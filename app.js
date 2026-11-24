@@ -65,7 +65,7 @@ const TOPICS = [
 ];
 const TOP = Object.fromEntries(TOPICS.map(t => [t.id, t]));
 const tname = t => t === 'psico' ? 'Psicotécnicos' : t === 'eng' ? 'Inglés' : (TOP[t]?.name || t);
-const ENG_SUBS = { grammar: 'Grammar C2', vocab: 'Vocabulary C2', words: 'Palabras C2 (definiciones)' };
+const ENG_SUBS = { exam: 'Exámenes oficiales ENAIRE (2017-2026)', practice: 'English Practice 1 y 2', grammar: 'Grammar C2 (examenglish)', vocab: 'Vocabulary C2 (examenglish)', words: 'Palabras C2 (definiciones)' };
 
 /* ---------- Banco de preguntas ---------- */
 const Q = {};
@@ -78,8 +78,10 @@ function materialize(q) {
   const same = D.words.filter(w => w.p === q.word.p && w.w !== q.word.w);
   const dis = shuffle(same.length >= 3 ? same : D.words.filter(w => w.w !== q.word.w)).slice(0, 3).map(w => w.d);
   const o = shuffle([q.word.d, ...dis]);
-  return Object.assign({}, q, { q: `${q.word.w} (${q.word.p})`, o, a: o.indexOf(q.word.d) });
+  return Object.assign({}, q, { q: `${q.word.w} (${q.word.p})`, o, a: o.indexOf(q.word.d), r: `«${q.word.w}» (${q.word.p}) = ${q.word.d}` });
 }
+// Exámenes oficiales de inglés y prácticas (agrupados por examen)
+const ENG_EXAMS = (() => { const m = {}; D.en.filter(x => x.ex).forEach(x => { (m[x.ex] = m[x.ex] || { id: x.ex, label: x.src, qs: [], sub: x.sub }).qs.push(x.id); }); return Object.values(m); })();
 const EXAMS = (() => { const m = {}; D.ex.forEach(x => { (m[x.ex] = m[x.ex] || { id: x.ex, label: x.src.replace('Examen ', ''), qs: [] }).qs.push(x.id); }); return Object.values(m); })();
 const pagesOf = t => R.res[t]?.pages || [];
 const qForPages = (t, a, b) => D.q.filter(x => x.t === t && R.qpage[x.id] >= a && R.qpage[x.id] <= b).map(x => x.id);
@@ -375,7 +377,7 @@ function renderQuiz(anim) {
       <div class="qmeta">${z.isRe ? `<span class="pill amber">${icon('repeat')} Repetición</span>` : ''}${qMeta(q)}</div>
       <div class="qtext">${esc(q.q)}</div>
       ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
-      ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + ': ' + esc(q.o[q.a])}</div></div>${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
+      ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + ': ' + esc(q.o[q.a])}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
         ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en tu resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Subrayado p. ${q.pg[0]}</a>` : ''}<span class="spacer"></span><a href="#" data-ov="${(ov === 'out' || (!ov && !inScope(q))) ? 'in' : 'out'}" class="muted">${(ov === 'out' || (!ov && !inScope(q))) ? 'Marcar «sí entra»' : 'Marcar «no entra»'}</a></div>` : ''}` : ''}
     </div>
     <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>
@@ -732,7 +734,7 @@ function submitExam() {
     <p class="muted">✓ ${ok} · ✗ ${ko} (−${(ko * z.penalty).toFixed(2)}) · en blanco ${blank} · ${mmss(now() - z.start)}</p>
     <div class="tblwrap"><table class="tbl" style="max-width:520px;margin:0 auto"><tr><th>Tema</th><th>✓</th><th>✗</th><th>—</th></tr>${Object.entries(byT).map(([t, v]) => `<tr><td style="text-align:left">${esc(tname(t))}</td><td class="mono">${v.ok}</td><td class="mono">${v.ko}</td><td class="mono">${v.b}</td></tr>`).join('')}</table></div>
     <div class="row" style="justify-content:center;margin-top:16px"><button class="btn" id="rev">${icon('eye')} Revisar respuestas</button><a class="btn ghost" href="${z.back}">Volver</a></div></div><div id="review"></div>`);
-  $('#rev').onclick = () => { $('#review').innerHTML = z.ids.map((id, i) => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; return `<div class="card"><div class="small muted">${i + 1} · ${esc(q.src || '')}</div><div class="qtext" style="font-size:16px">${esc(q.q)}</div>${q.o.map((o, k) => `<div class="opt ${k === q.a ? 'ok' : k === a ? 'ko' : ''}" style="cursor:default"><span class="l">${L[k].toUpperCase()}</span><span>${esc(o)}</span></div>`).join('')}${a == null ? '<div class="small muted">En blanco</div>' : ''}</div>`; }).join(''); };
+  $('#rev').onclick = () => { $('#review').innerHTML = z.ids.map((id, i) => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; return `<div class="card"><div class="small muted">${i + 1} · ${esc(q.src || '')}</div><div class="qtext" style="font-size:16px">${esc(q.q)}</div>${q.o.map((o, k) => `<div class="opt ${k === q.a ? 'ok' : k === a ? 'ko' : ''}" style="cursor:default"><span class="l">${L[k].toUpperCase()}</span><span>${esc(o)}</span></div>`).join('')}${a == null ? '<div class="small muted">En blanco</div>' : ''}${q.r ? `<div class="rule ${a === q.a ? '' : 'open'}"><div class="rh">${icon('book')} Regla</div><div>${esc(q.r)}</div></div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}</div>`; }).join(''); };
 }
 
 /* ---------- Inglés ---------- */
@@ -746,13 +748,19 @@ routes['ingles'] = () => {
     const c = pool.filter(q => !seen.has(q.id)); const arr = c.length ? c : pool; const ws = arr.map(q => 1 / (1 + rec(q.id).n));
     let s = Math.random() * ws.reduce((a, b) => a + b, 0); for (let i = 0; i < arr.length; i++) { s -= ws[i]; if (s <= 0) return arr[i].id; } return arr[0].id;
   };
-  app(`${head('Practicar', 'Inglés', 'En la Fase I la prueba de inglés es un test de nivel C1 (20 preguntas según la convocatoria 2025; se aprueba con 10). Aquí practicas con preguntas C2 de examenglish.com, un punto más difíciles.')}
-  <div class="card hl row"><div style="flex:1;min-width:200px"><h3>Simulacro de inglés</h3><div class="small muted">20 preguntas al azar · aprobado con 10 · sin penalización</div></div><button class="btn" id="engSim">${icon('play')} Empezar</button></div>
+  const realPool = ENG_EXAMS.filter(e => e.sub === 'exam').flatMap(e => e.qs).filter(id => !Q[id].res);
+  const sims = S.sims.filter(s => String(s.kind).startsWith('en-'));
+  app(`${head('Practicar', 'Inglés', 'En la Fase I la prueba de inglés es un test de nivel C1 (20 preguntas en las convocatorias 2024 y 2025; se aprueba con 10). Al responder verás siempre la regla gramatical o el significado, para que no vuelvas a fallar ese tipo de pregunta.')}
+  <div class="card hl row"><div style="flex:1;min-width:200px"><h3>Simulacro de inglés</h3><div class="small muted">20 preguntas de exámenes oficiales de ENAIRE · 25 min · aprobado con 10</div></div><button class="btn" id="engSim">${icon('play')} Empezar</button></div>
   ${Object.entries(ENG_SUBS).map(([s, n]) => { const x = st(s); return `<div class="task"><div class="body"><div class="tt">${n}</div><div class="small muted">${x.seen}/${x.n} vistas · ${pct(x.ok, x.seen)}% ✓</div><div class="bar"><i style="width:${pct(x.seen, x.n)}%"></i></div></div><button class="btn sm" data-r="${s}">A boleo</button>${s !== 'words' ? `<button class="btn ghost sm" data-l="${s}">En orden</button>` : ''}</div>`; }).join('')}
-  <div class="warnbox">${icon('alert')}<div>El test de vocabulario de Scribd no se pudo descargar: Scribd bloquea la descarga automática. Si me pasas el PDF, lo añado.</div></div>`);
+  <h2>Exámenes y prácticas, uno a uno</h2>
+  ${ENG_EXAMS.map(e => { const n = e.qs.filter(id => !Q[id].res).length; const last = sims.filter(s => s.kind === 'en-' + e.id).sort((a, b) => b.ts - a.ts)[0]; return `<div class="task"><div class="body"><div class="tt">${esc(e.label)}</div><div class="small muted">${n} preguntas${last ? ` · último: <b class="${last.pass ? 'c-ok' : 'c-ko'}">${last.net}/${last.max}</b>` : ''}</div></div><button class="btn sm" data-ee="${e.id}">Examen</button><button class="btn ghost sm" data-ep="${e.id}">Práctica</button></div>`; }).join('')}
+  <div class="warnbox">${icon('alert')}<div>El libro «Multiple choice english test C1» no trae soluciones, así que no lo he incluido: no quiero darte respuestas sin una clave oficial. Si tienes el solucionario, pásamelo y lo añado. El test de Scribd tampoco se pudo descargar.</div></div>`);
   $$('[data-r]').forEach(b => b.onclick = () => startQuiz({ title: ENG_SUBS[b.dataset.r], next: engNext([b.dataset.r]), back: '#/ingles' }));
   $$('[data-l]').forEach(b => b.onclick = () => startQuiz({ title: ENG_SUBS[b.dataset.l], list: ids(b.dataset.l), back: '#/ingles' }));
-  $('#engSim').onclick = () => startExam({ ids: shuffle([...ids('grammar'), ...ids('vocab')]).slice(0, 20), label: 'Simulacro inglés', kind: 'eng', minutes: 25, penalty: 0, pass: 10, back: '#/ingles' });
+  $('#engSim').onclick = () => startExam({ ids: shuffle(realPool).slice(0, 20), label: 'Simulacro inglés', kind: 'en-sim', minutes: 25, penalty: 0, pass: 10, back: '#/ingles' });
+  $$('[data-ee]').forEach(b => b.onclick = () => { const e = ENG_EXAMS.find(x => x.id === b.dataset.ee); const ids_ = e.qs.filter(id => !Q[id].res); startExam({ ids: ids_, label: e.label, kind: 'en-' + e.id, minutes: Math.round(ids_.length * 1.25), penalty: 0, pass: Math.ceil(ids_.length / 2), back: '#/ingles' }); });
+  $$('[data-ep]').forEach(b => b.onclick = () => { const e = ENG_EXAMS.find(x => x.id === b.dataset.ep); startQuiz({ title: e.label, list: e.qs, back: '#/ingles' }); });
 };
 
 /* ---------- Planning ---------- */

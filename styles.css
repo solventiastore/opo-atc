@@ -315,3 +315,11 @@ body.light .warnbox{background:#fffbeb;border-color:#fde68a;color:#92400e}
 body.light .pill.amber{color:#b45309}
 body.light .toast{background:#0f172a;color:#fff}
 body.light .bar{background:rgba(15,23,42,.08)}
+
+/* Regla gramatical / explicación tras responder */
+.rule{margin:12px 0 4px;padding:12px 14px;border-radius:13px;background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.28);color:var(--ink2);font-size:15px;line-height:1.55;animation:fadeUp .25s ease}
+.rule .rh{display:flex;align-items:center;gap:7px;font-weight:700;color:var(--violet);font-size:13px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.rule .rh svg{width:16px;height:16px}
+.rule.open{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.45)}
+body.light .rule{background:#f5f3ff;border-color:#ddd6fe;color:#3b0764}
+body.light .rule.open{background:#ede9fe;border-color:#c4b5fd}
