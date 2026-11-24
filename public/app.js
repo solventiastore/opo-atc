@@ -1,7 +1,9 @@
-/* Opo ATC · ENAIRE — app de estudio. Vanilla JS, sin dependencias. */
+/* OpoATC — app de estudio para la Fase I de controlador aéreo. Vanilla JS, sin dependencias. */
 (function () {
 'use strict';
-const D = window.DATA, R = window.RES || { res: {}, sched: { days: [], len: 31 }, qpage: {}, mem: [], docFails: [] };
+const D = window.DATA, R = window.RES || { res: {}, qpage: {}, mem: [], docFails: [] };
+const ME = window.ME || { features: [] }, OPO = window.OPO || {};
+const has = f => (ME.features || []).includes(f);
 const DAY = 864e5, L = 'abcdefghijklmn';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -45,6 +47,8 @@ const IC = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   star: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
   cards: '<rect x="2" y="6" width="14" height="16" rx="2"/><path d="M6 2h12a2 2 0 0 1 2 2v14"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
@@ -71,17 +75,17 @@ const ENG_SUBS = { exam: 'Exámenes oficiales ENAIRE (2017-2026)', practice: 'En
 const Q = {};
 D.q.forEach(x => { x.kind = 'cuest'; Q[x.id] = x; });
 D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
-D.en.forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
-D.words.forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
+(D.en || []).forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
+(D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
 function materialize(q) {
   if (q.sub !== 'words' || q.o) return q;
-  const same = D.words.filter(w => w.p === q.word.p && w.w !== q.word.w);
-  const dis = shuffle(same.length >= 3 ? same : D.words.filter(w => w.w !== q.word.w)).slice(0, 3).map(w => w.d);
+  const same = (D.words || []).filter(w => w.p === q.word.p && w.w !== q.word.w);
+  const dis = shuffle(same.length >= 3 ? same : (D.words || []).filter(w => w.w !== q.word.w)).slice(0, 3).map(w => w.d);
   const o = shuffle([q.word.d, ...dis]);
   return Object.assign({}, q, { q: `${q.word.w} (${q.word.p})`, o, a: o.indexOf(q.word.d), r: `«${q.word.w}» (${q.word.p}) = ${q.word.d}` });
 }
 // Exámenes oficiales de inglés y prácticas (agrupados por examen)
-const ENG_EXAMS = (() => { const m = {}; D.en.filter(x => x.ex).forEach(x => { (m[x.ex] = m[x.ex] || { id: x.ex, label: x.src, qs: [], sub: x.sub }).qs.push(x.id); }); return Object.values(m); })();
+const ENG_EXAMS = (() => { const m = {}; (D.en || []).filter(x => x.ex).forEach(x => { (m[x.ex] = m[x.ex] || { id: x.ex, label: x.src, qs: [], sub: x.sub }).qs.push(x.id); }); return Object.values(m); })();
 const EXAMS = (() => { const m = {}; D.ex.forEach(x => { (m[x.ex] = m[x.ex] || { id: x.ex, label: x.src.replace('Examen ', ''), qs: [] }).qs.push(x.id); }); return Object.values(m); })();
 const pagesOf = t => R.res[t]?.pages || [];
 const qForPages = (t, a, b) => D.q.filter(x => x.t === t && R.qpage[x.id] >= a && R.qpage[x.id] <= b).map(x => x.id);
@@ -89,19 +93,19 @@ const qForPages = (t, a, b) => D.q.filter(x => x.t === t && R.qpage[x.id] >= a &
 /* ---------- Sesión, estado y persistencia ---------- */
 const SESS_KEY = 'opo_session';
 let SESS = null; try { SESS = JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); } catch (e) {}
-const stateKey = () => 'opo_state_' + (SESS?.local ? 'local' : SESS?.user);
+const stateKey = () => 'opo_state_' + SESS?.user;
 const defaultSettings = () => ({
-  u: 0, weights: Object.fromEntries(TOPICS.map(t => [t.id, t.w])), onlyHl: true, pool: 'both',
+  u: 0, weights: Object.fromEntries(TOPICS.map(t => [t.id, t.w])), pool: 'both',
   penalty: 0.33, simMinutes: 50, examDate: '', planStart: '', planLen: 31,
   pages: { meteo: 20, ffhh: 20, carto: 14, nav: 18, aero: 8, fpl: 12, inst: 19, entorno: 3 }
 });
-const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, settings: defaultSettings() });
+const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, psy: {}, settings: defaultSettings() });
 let S = defaultState();
 function loadState() {
   let s = null; try { s = JSON.parse(localStorage.getItem(stateKey()) || 'null'); } catch (e) {}
   S = Object.assign(defaultState(), s || {});
   S.settings = Object.assign(defaultSettings(), S.settings || {});
-  ['pd', 'rd', 'ov', 'q', 'ps'].forEach(k => S[k] = S[k] || {});
+  ['pd', 'rd', 'ov', 'q', 'ps', 'psy'].forEach(k => S[k] = S[k] || {});
   // migración desde la versión anterior (un solo dispositivo)
   if (!S.migrated) {
     for (const k of ['enaire_v1', 'opo_state_local']) {
@@ -121,13 +125,14 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 function mergeState(a, b) {
   if (!b) return a;
-  a.ps = a.ps || {};
-  for (const k of ['q', 'ov', 'pd', 'rd', 'ps']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
+  a.ps = a.ps || {}; a.psy = a.psy || {};
+  for (const k of ['q', 'ov', 'pd', 'rd', 'ps', 'psy']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
   for (const k of ['study', 'log', 'sims']) {
     const m = new Map((a[k] || []).map(x => [x.id, x]));
     for (const x of (b[k] || [])) { const y = m.get(x.id); if (!y) m.set(x.id, x); else if ((x.u || 0) > (y.u || 0)) m.set(x.id, x); else if (k === 'study' && x.ids) { y.ids = [...new Set([...y.ids, ...x.ids])]; } }
     a[k] = [...m.values()];
   }
+  if (b.plan && (!a.plan || (b.plan.u || 0) > (a.plan.u || 0))) a.plan = b.plan;
   if ((b.settings?.u || 0) > (a.settings.u || 0)) a.settings = Object.assign(defaultSettings(), b.settings);
   return a;
 }
@@ -146,7 +151,7 @@ async function api(path, opts = {}) {
 let syncing = false;
 async function sync(manual) {
   const dot = $('#syncDot');
-  if (!SESS || SESS.local) { if (dot) dot.className = 'dot'; return; }
+  if (!SESS) { if (dot) dot.className = 'dot'; return; }
   if (syncing) return; syncing = true; if (dot) dot.className = 'dot busy';
   try {
     const remote = await api('sync');
@@ -162,22 +167,15 @@ async function sync(manual) {
   } finally { syncing = false; }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && SESS) sync().then(() => { if (!busy()) render(); }); });
-function logout(silent) {
-  if (SESS && !SESS.local && !silent) api('logout', { method: 'POST' }).catch(() => {});
-  SESS = null; localStorage.removeItem(SESS_KEY); boot();
-}
+function logout() { if (OPO.logout) return OPO.logout(); localStorage.removeItem(SESS_KEY); location.reload(); }
 
 /* ---------- Lógica de estudio ---------- */
 const rec = id => S.q[id] || { n: 0, ok: 0, ko: 0 };
-function inScope(q) {
-  const o = S.ov[q.id]; if (o) return o.v === 'in';
-  if (q.kind !== 'cuest') return true;
-  return (q.hl ?? 1) >= 0.25;
-}
+const inScope = () => true;
 function poolFor(topics, opts = {}) {
   const pool = opts.pool || S.settings.pool;
   return Object.values(Q).filter(q => q.kind !== 'eng' && topics.includes(q.t) && !q.dup && !q.res &&
-    (pool === 'both' || (pool === 'cuest' ? q.kind === 'cuest' : q.kind === 'exam')) && (!S.settings.onlyHl || inScope(q)));
+    (pool === 'both' || (pool === 'cuest' ? q.kind === 'cuest' : q.kind === 'exam')));
 }
 function record(id, ok) {
   const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[id]); const first = !r.n;
@@ -202,7 +200,7 @@ function dueReviews() {
 }
 const pendingFails = () => Object.entries(S.q).filter(([id, r]) => r.pend && Q[id]).map(([id]) => id);
 function topicStats(t) {
-  const qs = D.q.filter(q => q.t === t); const sc = qs.filter(inScope);
+  const qs = D.q.filter(q => q.t === t); const sc = qs;
   const seen = sc.filter(q => rec(q.id).n); const okq = seen.filter(q => rec(q.id).last === 1);
   return { total: qs.length, scope: sc.length, seen: seen.length, ok: okq.length };
 }
@@ -214,69 +212,144 @@ function streak() {
 }
 function markRead(t, a, b, label) {
   for (let p = a; p <= b; p++) S.rd[t + ':' + p] = { v: 1, u: now() };
-  const ids = qForPages(t, a, b).filter(id => !S.settings.onlyHl || inScope(Q[id]));
+  const ids = qForPages(t, a, b);
   const n = addStudy(ymd(), t, ids, label || `resumen págs. ${a}–${b}`);
   S.log.push({ id: uid(), d: ymd(), topic: t, pf: a, pt: b, note: 'Leído en la app', u: now() });
   save(); return ids;
 }
 
-/* ---------- Plan adaptativo (a partir de tu Excel de seguimiento) ----------
-   El Excel se convierte en una lista ordenada de «bloques» (cada día del Excel con tareas = 1 bloque).
-   Cada día, al abrir la app, se fija qué bloques tocan hoy. Lo pendiente se reparte solo entre los días
-   que quedan hasta el examen: si te atrasas, se comprime; si adelantas, se estira. */
+/* ---------- Plan personalizado ----------
+   Se genera a partir de tus respuestas (fecha del examen, tiempo, días libres, prioridades) y del contenido:
+   resúmenes por bloques de páginas y, tras cada bloque, las preguntas del cuestionario de esas páginas.
+   Cada día se fija lo que toca al abrir la app; lo pendiente se recoloca solo en los días que quedan. */
+const MINS_PAGE = 30, MINS_Q = 0.6;
+const WD = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+const dow = ds => new Date(ds + 'T12:00:00').getDay();
+const defaultCfg = () => ({ examDate: S.settings.examDate || '', weeks: 10, start: ymd(), minWeek: 120, minWeekend: 180, off: [0], restEvery: 0,
+  finalDays: 7, level: 'cero', priority: 'recomendada', entorno: false, eng: has('ingles') ? 20 : 0, psico: has('psico') ? 20 : 0 });
 const P = {
-  groups: R.sched.days.filter(d => d.items.length).map((d, gi) => ({ gi, items: d.items.map((it, i) => Object.assign({ key: `${d.d}:${i}`, gi }, it)) })),
-  finalNote: R.sched.days.filter(d => d.note).map(d => d.note).join('\n'),
-  len: () => Math.max(7, +S.settings.planLen || R.sched.len || 31),
-  firstDay() { const ds = Object.keys(S.ps || {}).sort(); return S.settings.planStart || ds[0] || ymd(); },
-  // último día de estudio: la víspera del examen (o inicio + duración si no hay fecha)
-  end() { return S.settings.examDate ? addDays(S.settings.examDate, -1) : addDays(P.firstDay(), P.len() - 1); },
-  done: key => !!S.pd[key]?.v,
-  doneOn: key => S.pd[key]?.v ? (S.pd[key].d || null) : null,
+  cfg: () => Object.assign(defaultCfg(), S.plan?.cfg || {}),
+  examDate() { const c = P.cfg(); return c.examDate || addDays(c.start, c.weeks * 7); },
+  lastStudy() { return addDays(P.examDate(), -1 - (+P.cfg().finalDays || 0)); },
+  end() { return addDays(P.examDate(), -1); },
+  isOff(ds) {
+    const c = P.cfg(); const w = dow(ds);
+    if ((c.off || []).includes(w)) return true;
+    if (+c.restEvery > 0) { const wk = Math.floor(diffDays(c.start, ds) / 7); if (wk % +c.restEvery === +c.restEvery - 1) { const extra = [6, 5, 4, 3, 2, 1, 0].find(d => !(c.off || []).includes(d)); if (w === extra) return true; } }
+    return false;
+  },
+  isFinal: ds => ds > P.lastStudy() && ds <= P.end(),
+  cap(ds) { const c = P.cfg(); const base = (dow(ds) === 0 || dow(ds) === 6) ? +c.minWeekend : +c.minWeek; return Math.max(20, base - (has('ingles') ? +c.eng || 0 : 0) - (has('psico') ? +c.psico || 0 : 0)); },
+  _tasks: null, _sig: '',
+  tasks() {
+    const c = P.cfg(); const sig = JSON.stringify([c.level, c.priority, c.entorno, S.plan?.u || 0]);
+    if (P._tasks && P._sig === sig) return P._tasks;
+    const streams = {};
+    const order = TOPICS.filter(t => t.id !== 'entorno' || c.entorno);
+    for (const t of order) {
+      const out = []; const pages = pagesOf(t.id).map(p => p.p); const used = new Set();
+      const step = c.level === 'repaso' ? 3 : 2;
+      for (let i = 0; i < pages.length; i += step) {
+        const a = pages[i], b = pages[Math.min(i + step, pages.length) - 1];
+        out.push({ key: `res:${t.id}:${a}-${b}`, k: 'res', t: t.id, a, b, mins: (b - a + 1) * MINS_PAGE * (c.level === 'repaso' ? 0.5 : 1) });
+        const ids = qForPages(t.id, a, b).filter(id => !used.has(id)); ids.forEach(id => used.add(id));
+        for (let j = 0; j < ids.length; j += 25) { const part = ids.slice(j, j + 25); out.push({ key: `qp:${t.id}:${a}-${b}:${j}`, k: 'qp', t: t.id, a, b, ids: part, mins: Math.ceil(part.length * MINS_Q) + 5 }); }
+      }
+      const rest = D.q.filter(x => x.t === t.id && !used.has(x.id)).sort((x, y) => x.n - y.n);
+      for (let j = 0; j < rest.length; j += 25) { const part = rest.slice(j, j + 25); out.push({ key: `q:${t.id}:${part[0].n}-${part[part.length - 1].n}`, k: 'q', t: t.id, a: part[0].n, b: part[part.length - 1].n, ids: part.map(x => x.id), mins: Math.ceil(part.length * MINS_Q) + 5 }); }
+      if (out.length) streams[t.id] = out;
+    }
+    let list = [];
+    if (c.priority === 'orden') list = TOPICS.slice().sort((a, b) => a.n - b.n).flatMap(t => streams[t.id] || []);
+    else {
+      const sh = c.priority === 'examen' ? realShares() : null;
+      const w = id => sh ? Math.max(0.05, sh[id] || 0.05) : ({ meteo: 3, nav: 3, ffhh: 3, carto: 2, fpl: 2 }[id] || 1);
+      const vt = {}, idx = {}; Object.keys(streams).forEach(k => { vt[k] = 0; idx[k] = 0; });
+      for (;;) { const ks = Object.keys(streams).filter(k => idx[k] < streams[k].length); if (!ks.length) break; const k = ks.sort((a, b) => vt[a] - vt[b])[0]; const tk = streams[k][idx[k]++]; vt[k] += tk.mins / w(k); list.push(tk); }
+    }
+    P._tasks = list; P._sig = sig; P.byKey = Object.fromEntries(list.map(t => [t.key, t]));
+    return list;
+  },
+  get(key) { P.tasks(); return P.byKey[key] || P.recurring(key); },
+  done(key) {
+    if (S.pd[key]?.v) return true;
+    const t = P.get(key); if (!t) return false;
+    if (t.k === 'res') { for (let p = t.a; p <= t.b; p++) if (!S.rd[t.t + ':' + p]?.v) return false; return true; }
+    if (t.ids) return t.ids.every(id => rec(id).n > 0);
+    return false;
+  },
+  doneOn(key) {
+    if (S.pd[key]?.v) return S.pd[key].d || null;
+    if (!P.done(key)) return null; const t = P.get(key); let m = 0;
+    if (t.k === 'res') for (let p = t.a; p <= t.b; p++) m = Math.max(m, S.rd[t.t + ':' + p]?.u || 0);
+    else if (t.ids) t.ids.forEach(id => m = Math.max(m, rec(id).t || 0));
+    return m ? ymd(m) : null;
+  },
   setDone(key, v) { S.pd[key] = { v: v ? 1 : 0, u: now(), d: v ? ymd() : null }; save(); },
-  pendingG: g => g.items.some(it => !P.done(it.key)),
-  // reparte una lista de bloques entre los días [from, to]
-  spread(list, from, to) {
-    const N = Math.max(1, diffDays(from, to) + 1), n = list.length, out = {};
-    list.forEach((g, i) => { const d = addDays(from, Math.floor(i * N / n)); (out[d] = out[d] || []).push(g.gi); });
+  studyDays(from, to) { const out = []; for (let d = from; d <= to; d = addDays(d, 1)) if (!P.isOff(d)) out.push(d); return out; },
+  spread(list, from) {
+    const days = P.studyDays(from, P.lastStudy()); const out = {}; if (!list.length) return out;
+    if (!days.length) { out[from] = list.map(t => t.key); return out; }
+    const total = list.reduce((a, t) => a + t.mins, 0);
+    const capSum = days.reduce((a, d) => a + P.cap(d), 0); const factor = Math.max(1, total / capSum);
+    let i = 0;
+    for (let di = 0; di < days.length && i < list.length; di++) {
+      const d = days[di]; const target = di === days.length - 1 ? Infinity : P.cap(d) * factor; let sum = 0; out[d] = [];
+      while (i < list.length && (sum === 0 || sum + list[i].mins <= target * 1.1)) { out[d].push(list[i].key); sum += list[i].mins; i++; }
+    }
     return out;
   },
-  // fija los bloques de hoy la primera vez que se abre la app en el día
   today() {
     const t = ymd(); S.ps = S.ps || {};
-    if (!S.ps[t]) {
-      const pend = P.groups.filter(P.pendingG);
-      const first = P.spread(pend, t, P.end() < t ? t : P.end())[t] || [];
-      S.ps[t] = { g: first, u: now() }; save();
+    if (!S.ps[t] || !Array.isArray(S.ps[t].k)) {
+      const pend = P.tasks().filter(x => !P.done(x.key));
+      S.ps[t] = { k: P.isOff(t) || P.isFinal(t) ? [] : (P.spread(pend, t)[t] || []), u: now() }; if (!P._preview) save();
     }
-    return S.ps[t].g;
+    return S.ps[t].k.filter(k => P.get(k));
   },
-  // planificación completa: {fecha: [bloques]} desde hoy hasta el último día
   schedule() {
-    const t = ymd(), todayG = P.today(), end = P.end() < t ? t : P.end();
-    const rest = P.groups.filter(g => P.pendingG(g) && !todayG.includes(g.gi));
-    const fut = end > t ? P.spread(rest, addDays(t, 1), end) : (rest.length ? { [t]: rest.map(g => g.gi) } : {});
-    const sch = { [t]: [...todayG, ...(end > t ? [] : (fut[t] || []))] };
-    for (const [d, gs] of Object.entries(fut)) if (d !== t) sch[d] = gs;
-    return sch;
+    const t = ymd(); const todayK = P.today();
+    const rest = P.tasks().filter(x => !P.done(x.key) && !todayK.includes(x.key));
+    const sch = P.spread(rest, addDays(t, 1)); sch[t] = todayK; return sch;
   },
-  adelantar() { // trae a hoy el siguiente bloque pendiente
-    const sch = P.schedule(), t = ymd(); const next = Object.keys(sch).filter(d => d > t).sort()[0];
-    if (!next) return 0; S.ps[t].g = [...S.ps[t].g, ...sch[next]]; S.ps[t].u = now(); save(); return sch[next].length;
+  adelantar() {
+    const sch = P.schedule(), t = ymd(); const next = Object.keys(sch).filter(d => d > t && sch[d].length).sort()[0];
+    if (!next) return 0; S.ps[t].k = [...S.ps[t].k, ...sch[next]]; S.ps[t].u = now(); save(); return sch[next].length;
   },
-  itemsOf: gis => gis.flatMap(gi => P.groups[gi].items),
+  // tareas diarias que no van en el temario (inglés, psicotécnicos, repaso final)
+  recurring(key) {
+    const m = /^d:(\d{4}-\d{2}-\d{2}):(\w+)$/.exec(key || ''); if (!m) return null; const c = P.cfg();
+    const mins = { eng: +c.eng, psico: +c.psico, sim: 70, fall: 40 }[m[2]]; if (mins == null) return null;
+    return { key, d: m[1], k: m[2], t: m[2], mins };
+  },
+  dailyFor(ds) {
+    if (P.isOff(ds) || ds > P.end()) return []; const c = P.cfg(); const out = [];
+    if (P.isFinal(ds)) { out.push(`d:${ds}:sim`, `d:${ds}:fall`); }
+    if (has('ingles') && +c.eng > 0) out.push(`d:${ds}:eng`);
+    if (has('psico') && +c.psico > 0) out.push(`d:${ds}:psico`);
+    return out;
+  },
+  itemsFor(ds) {
+    const t = ymd(); let keys;
+    if (ds < t) keys = S.ps[ds]?.k || S.ps[ds]?.g || [];
+    else keys = P.schedule()[ds] || [];
+    keys = keys.filter(k => P.get(k));
+    if (ds <= t) P.tasks().forEach(x => { if (!keys.includes(x.key) && P.doneOn(x.key) === ds) keys.push(x.key); });
+    return [...keys, ...P.dailyFor(ds)].map(k => P.get(k));
+  },
   stats() {
-    const all = P.groups.flatMap(g => g.items); const done = all.filter(it => P.done(it.key)).length;
-    const t = ymd(); const daysLeft = Math.max(1, diffDays(t, P.end()) + 1);
-    return { total: all.length, done, left: all.length - done, daysLeft, perDay: (all.length - done) / daysLeft, blocksLeft: P.groups.filter(P.pendingG).length };
+    const all = P.tasks(); const done = all.filter(x => P.done(x.key)); const pend = all.filter(x => !P.done(x.key));
+    const t = ymd(); const days = P.studyDays(t, P.lastStudy()); const mins = pend.reduce((a, x) => a + x.mins, 0); const cap = days.reduce((a, d) => a + P.cap(d), 0);
+    const finish = (() => { const sch = P.schedule(); return Object.keys(sch).filter(d => sch[d].length).sort().pop() || t; })();
+    return { total: all.length, done: done.length, left: pend.length, daysLeft: days.length, hoursLeft: Math.round(mins / 60), capHours: Math.round(cap / 60), ok: mins <= cap, finish };
   },
 };
-const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'q' ? `preg. ${it.a}–${it.b}` : (it.n || '30 min');
+const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'qp' ? `${it.ids.length} preg. (p. ${it.a}${it.b !== it.a ? '–' + it.b : ''})` : it.k === 'q' ? `nº ${it.a}–${it.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', sim: 'Simulacro', fall: 'Falladas' }[it.k] || '');
 
 /* ---------- Shell / navegación ---------- */
 const NAV = [
-  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario subrayado'], ['cambios', 'alert', 'Cambios 2026']] },
-  { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['ingles', 'globe', 'Inglés']] },
+  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario oficial'], ['cambios', 'alert', 'Cambios 2026']] },
+  { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['ingles', 'globe', 'Inglés'], ['psicotecnicos', 'brain', 'Psicotécnicos']] },
   { g: 'Seguimiento', items: [['plan', 'grid', 'Mi plan'], ['planning', 'cal', 'Planning'], ['stats', 'chart', 'Estadísticas'], ['ajustes', 'gear', 'Ajustes']] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); TITLES.practicar = 'Practicar'; TITLES.mas = 'Más';
@@ -285,7 +358,7 @@ const theme = () => localStorage.getItem(THEME_KEY) || 'light';
 function applyTheme(inApp) {
   const light = inApp && theme() === 'light';
   document.body.classList.toggle('light', light);
-  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = light ? '#ffffff' : '#05080f';
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = light ? '#ffffff' : '#00162F';
 }
 const initials = n => (n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -294,12 +367,12 @@ function shell() {
   const nm = SESS.name || SESS.user || 'Invitado';
   $('#root').innerHTML = `<div class="shell">
     <aside class="side">
-      <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC<div class="tiny" style="letter-spacing:.08em">Controlador ENAIRE</div></span></div>
+      <div class="logo"><img class="mark" src="assets/logo-mark.svg" alt=""><span>Opo<b>ATC</b><div class="tiny" style="letter-spacing:.08em">Fase I · controlador aéreo</div></span></div>
       <nav>${NAV.map(g => `<div class="tiny grp">${g.g}</div>` + g.items.map(([r, ic, t]) => `<a href="#/${r}" data-r="${r}">${icon(ic)}<span>${t}</span><span class="cnt" data-cnt="${r}"></span></a>`).join('')).join('')}</nav>
-      <div class="me"><div class="avatar">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)}</div><div class="small muted">${SESS.local ? 'Solo este dispositivo' : '@' + esc(SESS.user)}</div></div><span id="syncDot" class="dot" title="Sincronización"></span></div>
+      <div class="me"><div class="avatar">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)}</div><div class="small muted">${esc(({ teoria: 'Plan Teoría', ingles: 'Plan Teoría + Inglés', completo: 'Plan Completo' })[ME.plan?.id] || (ME.admin ? 'Administrador' : ME.comp ? 'Acceso gratuito' : SESS.user))}</div></div><span id="syncDot" class="dot" title="Sincronización"></span></div>
     </aside>
     <div>
-      <header class="topbar"><div class="logo"><span class="mark">${icon('plane')}</span></div><div class="ttl" id="ttl"></div><span id="syncDot2" class="dot"></span><a class="avatar" href="#/ajustes" title="Cuenta">${esc(initials(nm))}</a></header>
+      <header class="topbar"><div class="logo"><img class="mark" src="assets/logo-mark.svg" alt=""></div><div class="ttl" id="ttl"></div><span id="syncDot2" class="dot"></span><a class="avatar" href="#/ajustes" title="Cuenta">${esc(initials(nm))}</a></header>
       <main id="app"></main>
     </div>
   </div>
@@ -316,7 +389,7 @@ function shell() {
 }
 function updateChrome(r) {
   $$('.side nav a').forEach(a => a.classList.toggle('on', a.dataset.r === r));
-  const tabMap = { '': '', hoy: 'hoy', plan: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', ingles: 'practicar', practicar: 'practicar' };
+  const tabMap = { '': '', hoy: 'hoy', plan: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', ingles: 'practicar', psicotecnicos: 'practicar', practicar: 'practicar' };
   const tr = r in tabMap ? tabMap[r] : 'mas';
   $$('.tabbar a').forEach(a => a.classList.toggle('on', a.dataset.t === tr));
   $('#ttl').textContent = TITLES[r] ?? '';
@@ -329,7 +402,7 @@ function updateChrome(r) {
 /* ---------- Router ---------- */
 const routes = {};
 let QZ = null, EXZ = null, timerH;
-const busy = () => (QZ && !QZ.finished) || (EXZ && !EXZ.done);
+const busy = () => (QZ && !QZ.finished) || (EXZ && !EXZ.done) || (typeof PZ !== 'undefined' && PZ && !PZ.done && location.hash.startsWith('#/psicotecnicos/'));
 function parseHash() {
   const h = location.hash.replace(/^#\/?/, ''); const [path, qs] = h.split('?');
   const parts = path.split('/').map(decodeURIComponent); const q = Object.fromEntries(new URLSearchParams(qs || ''));
@@ -398,7 +471,6 @@ function qMeta(q) {
   else if (q.kind === 'exam') b.push(`<span class="pill cyan">${icon('exam')} ${esc(q.src)} · nº ${q.n}</span><span class="pill">${esc(TOP[q.t]?.short || q.t)}</span>`);
   else b.push(`<span class="pill violet">${esc(q.src)}</span>`);
   if (q.rep) b.push(`<span class="pill amber">${icon('star')} Repetida en ${esc(q.rep.join(', '))}</span>`);
-  if (q.kind === 'cuest' && !inScope(q)) b.push('<span class="pill ko">Posiblemente no subrayado</span>');
   if (r.n) b.push(`<span class="pill">${r.ok}✓ ${r.ko}✗</span>`);
   return b.join('');
 }
@@ -414,13 +486,12 @@ function renderQuiz(anim) {
       <div class="qtext">${esc(q.q)}</div>
       ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
       ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + ': ' + esc(q.o[q.a])}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
-        ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en tu resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Subrayado p. ${q.pg[0]}</a>` : ''}<span class="spacer"></span><a href="#" data-ov="${(ov === 'out' || (!ov && !inScope(q))) ? 'in' : 'out'}" class="muted">${(ov === 'out' || (!ov && !inScope(q))) ? 'Marcar «sí entra»' : 'Marcar «no entra»'}</a></div>` : ''}` : ''}
+        ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en tu resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
     </div>
     <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>
     <div class="kbd">Teclado: 1-9 o A-D para responder · Enter para seguir</div>`);
   $$('.opt').forEach(b => b.onclick = () => answer(+b.dataset.i));
   $('#nextBtn').onclick = nextQuestion; $('#endBtn').onclick = finishQuiz;
-  const o = $('[data-ov]'); if (o) o.onclick = e => { e.preventDefault(); S.ov[q.id] = { v: o.dataset.ov, u: now() }; save(); toast(o.dataset.ov === 'out' ? 'Marcada «no entra»: no saldrá con el filtro de subrayado' : 'Marcada «sí entra»'); renderQuiz(); };
   if (!anim) window.scrollTo(0, 0);
   else { const f = $('.fb'); if (f && f.getBoundingClientRect().bottom > innerHeight - 140) window.scrollBy({ top: f.getBoundingClientRect().bottom - innerHeight + 160, behavior: 'smooth' }); }
 }
@@ -454,13 +525,13 @@ routes[''] = () => {
   const dr = dueReviews(), pf = pendingFails();
   const days = S.settings.examDate ? Math.ceil((new Date(S.settings.examDate + 'T09:00:00') - now()) / DAY) : null;
   const todayN = Object.values(S.q).filter(r => r.t && ymd(r.t) === ymd()).length;
-  const st = streak(); const items = P.itemsOf(P.today()).concat(P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === ymd() && !P.today().includes(it.gi))); const pst = P.stats();
+  const st = streak(); const items = P.itemsFor(ymd()); const pst = P.stats();
   const doneN = items.filter(i => P.done(i.key)).length;
   const h = new Date().getHours(); const hi = h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches';
   const prio = TOPICS.filter(t => t.id !== 'entorno');
   app(`${head(fmtDate(ymd(), { weekday: 'long', day: 'numeric', month: 'long' }), `${hi}, ${esc((SESS.name || '').split(' ')[0] || 'piloto')}`, 'Tu torre de control para la oposición a controlador de ENAIRE.')}
   <div class="grid g4" style="margin-top:16px">
-    <a class="kpi" href="#/planning"><div class="ic c-cyan">${icon('target')}</div><div class="tiny">Examen</div><div class="v">${days != null ? (days >= 0 ? days : '—') : '—'}</div><div class="s">${S.settings.examDate ? 'días · ' + fmtDate(S.settings.examDate) : 'Pon la fecha en Planning'}</div></a>
+    <a class="kpi" href="#/planning"><div class="ic c-cyan">${icon('target')}</div><div class="tiny">Examen</div><div class="v">${days != null ? (days >= 0 ? days : '—') : '—'}</div><div class="s">${S.settings.examDate ? 'días · ' + fmtDate(S.settings.examDate) : 'Ponla en Planning'}</div></a>
     <a class="kpi" href="#/repaso"><div class="ic c-violet">${icon('repeat')}</div><div class="tiny">Repasos hoy</div><div class="v">${dr.length}</div><div class="s">1 · 3 · 7 días</div></a>
     <a class="kpi" href="#/falladas"><div class="ic c-ko">${icon('x')}</div><div class="tiny">Falladas</div><div class="v">${pf.length}</div><div class="s">pendientes de dominar</div></a>
     <a class="kpi" href="#/stats"><div class="ic c-amber">${icon('flame')}</div><div class="tiny">Racha</div><div class="v">${st}</div><div class="s">${todayN} preguntas hoy</div></a>
@@ -468,32 +539,34 @@ routes[''] = () => {
   <a class="card hl" href="#/hoy" style="display:flex;gap:16px;align-items:center;color:inherit">
     ${ring(pct(doneN, items.length || 1), 70, 8, items.length ? `${doneN}/${items.length}` : '—')}
     <div style="flex:1"><div class="eyebrow" style="margin:0">Hoy toca · plan al ${pct(pst.done, pst.total)}% · quedan ${pst.left} tareas</div>
-    <div style="font-weight:650;margin-top:4px">${items.length ? items.filter(i => i.k !== 'psico').slice(0, 4).map(i => `${TOP[i.t]?.short || tname(i.t)} ${i.k === 'res' ? 'págs. ' + i.a + '–' + i.b : 'preg. ' + i.a + '–' + i.b}`).join(' · ') : 'Día de repaso: falladas y repasos 1·3·7'}</div></div>${icon('chevR', 'chev')}</a>
+    <div style="font-weight:650;margin-top:4px">${items.length ? items.slice(0, 4).map(i => `${TOP[i.t]?.short || tname(i.t)} ${itemLabel(i)}`).join(' · ') : 'Día libre o de repaso: falladas y repasos 1·3·7'}</div></div>${icon('chevR', 'chev')}</a>
   <div class="row" style="margin:14px 0 6px"><a class="btn" href="#/aleatorio">${icon('shuffle')} A boleo</a><a class="btn sec" href="#/cuestionarios">${icon('layers')} Cuestionarios</a><a class="btn sec" href="#/examenes">${icon('exam')} Simulacro</a></div>
   ${R.cambios ? `<a class="card flat row" href="#/cambios" style="color:inherit"><div class="ico" style="width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--glass2)">${icon('alert')}</div><div style="flex:1"><b>Temario 2026 publicado</b><div class="small muted">Casi todo son erratas; cambian sobre todo las fichas de aeronaves (tema 2) y la flecha del ala (tema 9).</div></div>${icon('chevR', 'chev')}</a>` : ''}
   <h2>Tu progreso por tema</h2>
   <div class="topics">${prio.map(t => { const s = topicStats(t.id); return `<a class="topic" href="#/cuestionarios/${t.id}" style="--tc:${t.c}33"><div class="n">TEMA ${t.n}</div><div class="nm">${t.name}${t.w >= 3 ? '<span class="pill cyan">prioritario</span>' : ''}</div>
     <div class="bar"><i style="width:${pct(s.seen, s.scope)}%;background:${t.c}"></i></div><div class="row small muted"><span>${pct(s.seen, s.scope)}% hecho</span><span class="spacer"></span><span>${pct(s.ok, s.seen)}% acierto</span></div></a>`; }).join('')}</div>
-  ${SESS.local ? `<div class="warnbox">${icon('alert')}<div>Estás usando la app sin cuenta: el progreso solo se guarda en este dispositivo. <a href="#/ajustes">Crea una cuenta</a> para tenerlo en el móvil y en el PC.</div></div>` : ''}`);
+`);
 };
 
-/* ---------- Hoy toca (plan adaptativo) ---------- */
-// etiqueta del tema (en lugar de una franja de color a la izquierda)
-const tbadge = tp => { const x = TOP[tp]; return `<span class="tbadge" style="--tc:${x?.c || '#94a3b8'}" title="${esc(tname(tp))}">${x ? 'T' + x.n : tp === 'psico' ? icon('brain') : icon('globe')}</span>`; };
+/* ---------- Hoy toca ---------- */
+const tbadge = tp => { const x = TOP[tp]; const ic = { psico: 'brain', eng: 'globe', sim: 'exam', fall: 'x' }[tp]; return `<span class="tbadge" style="--tc:${x?.c || '#009FDA'}" title="${esc(tname(tp))}">${x ? 'T' + x.n : icon(ic || 'star')}</span>`; };
 function taskCard(it, day) {
-  const d = P.done(it.key), on = P.doneOn(it.key); const t = TOP[it.t]; const isPast = day < ymd();
+  const d = P.done(it.key), on = P.doneOn(it.key); const isPast = day < ymd();
   let title, desc, actions = '';
   if (it.k === 'res') {
-    const has = pagesOf(it.t).length; const nq = qForPages(it.t, it.a, it.b).length;
+    const nq = qForPages(it.t, it.a, it.b).length;
     title = `${tname(it.t)} · resumen págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}`;
-    desc = has ? `${(it.b - it.a + 1) * (R.sched.minPerPage || 30)} min aprox.${nq ? ` · ${nq} preguntas de estas páginas irán al repaso 1·3·7` : ''}${R.res[it.t].exact ? '' : ' · páginas aproximadas'}` : 'Aún no tengo tu resumen de este tema.';
-    if (has) actions = `<a class="btn sm" href="#/resumenes/${it.t}/${it.a}?to=${it.b}&task=${encodeURIComponent(it.key)}">${icon('book')} Leer</a>`;
-  } else if (it.k === 'q') {
-    const n = D.q.filter(x => x.t === it.t && x.n >= it.a && x.n <= it.b).length;
-    title = `${tname(it.t)} · cuestionario preguntas ${it.a}–${it.b}`; desc = `${n} preguntas${it.n ? ' · ' + esc(it.n) : ''} · entran en tu repaso 1·3·7`;
+    desc = `${Math.round(it.mins)} min aprox.${nq ? ` · luego ${nq} preguntas de estas páginas` : ''}`;
+    actions = `<a class="btn sm" href="#/resumenes/${it.t}/${it.a}?to=${it.b}&task=${encodeURIComponent(it.key)}">${icon('book')} Leer</a>`;
+  } else if (it.k === 'qp' || it.k === 'q') {
+    title = it.k === 'qp' ? `${tname(it.t)} · preguntas de las págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : `${tname(it.t)} · cuestionario nº ${it.a}–${it.b}`;
+    desc = `${it.ids.length} preguntas · ${it.mins} min aprox. · entran en tu repaso 1·3·7`;
     actions = `<button class="btn sm" data-q="${it.key}">${icon('play')} Hacer</button>`;
-  } else { title = 'Psicotécnicos'; desc = esc(it.n || '30 min'); }
-  const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast ? '<span class="pill amber">pendiente → se ha recolocado</span>' : '');
+  } else if (it.k === 'eng') { title = 'Inglés'; desc = `${it.mins} min · preguntas tipo examen con la regla explicada`; actions = `<a class="btn sm" href="#/ingles">${icon('globe')} Practicar</a>`; }
+  else if (it.k === 'psico') { title = 'Psicotécnicos'; desc = `${it.mins} min · series, cálculo, atención y memoria`; actions = `<a class="btn sm" href="#/psicotecnicos">${icon('brain')} Practicar</a>`; }
+  else if (it.k === 'sim') { title = 'Simulacro de examen'; desc = '50 preguntas · 50 min · −0,33 por fallo'; actions = `<a class="btn sm" href="#/examenes">${icon('exam')} Hacer simulacro</a>`; }
+  else if (it.k === 'fall') { title = 'Falladas y repasos pendientes'; desc = `${pendingFails().length} falladas · ${dueReviews().length} repasos 1·3·7`; actions = `<a class="btn sm" href="#/falladas">${icon('x')} Repasar</a>`; }
+  const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast && !it.d ? '<span class="pill amber">recolocado</span>' : '');
   return `<div class="task ${d ? 'done' : ''}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>${tbadge(it.t)}
     <div class="body"><div class="tt">${title} ${badge}</div><div class="small muted" style="margin:3px 0 8px">${desc}</div><div class="row">${actions}</div></div></div>`;
 }
@@ -501,71 +574,130 @@ function bindTasks(items, back) {
   $$('[data-tick]').forEach(b => b.onclick = () => {
     const key = b.dataset.tick, it = items.find(i => i.key === key), nv = !P.done(key);
     P.setDone(key, nv);
-    if (nv && it.k === 'res' && pagesOf(it.t).length) { const ids = markRead(it.t, it.a, it.b); if (ids.length) toast(`${ids.length} preguntas de estas páginas al repaso 1·3·7`); }
+    if (nv && it.k === 'res') { const ids = markRead(it.t, it.a, it.b); if (ids.length) toast(`${ids.length} preguntas de estas páginas al repaso 1·3·7`); }
+    if (!nv && it.k === 'res') { for (let p = it.a; p <= it.b; p++) S.rd[it.t + ':' + p] = { v: 0, u: now() }; save(); }
     render();
   });
   $$('[data-q]').forEach(b => b.onclick = () => {
     const it = items.find(i => i.key === b.dataset.q);
-    const ids = D.q.filter(x => x.t === it.t && x.n >= it.a && x.n <= it.b).map(x => x.id);
-    startQuiz({ title: `${tname(it.t)} ${it.a}–${it.b}`, list: ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
+    startQuiz({ title: `${tname(it.t)} · ${itemLabel(it)}`, list: it.ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
   });
 }
-const taskMins = items => items.reduce((a, i) => a + (i.k === 'res' ? (i.b - i.a + 1) * (R.sched.minPerPage || 30) : i.k === 'q' ? Math.ceil((i.b - i.a + 1) * 0.6) : 30), 0);
+const taskMins = items => items.reduce((a, i) => a + (i.mins || 0), 0);
 routes['hoy'] = (args, q) => {
-  const t = ymd(); const day = q.f || t; const sch = P.schedule(); const isToday = day === t, isPast = day < t;
-  const gis = isPast ? (S.ps[day]?.g || []) : (sch[day] || []);
-  let items = P.itemsOf(gis);
-  if (isPast || isToday) { const extra = P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === day && !gis.includes(it.gi)); items = items.concat(extra); }
+  const t = ymd(); const day = q.f || t; const isToday = day === t, isPast = day < t;
+  const items = P.itemsFor(day); const off = P.isOff(day), fin = P.isFinal(day);
   const doneN = items.filter(i => P.done(i.key)).length; const mins = taskMins(items.filter(i => !P.done(i.key)));
-  const days = Object.keys(sch).sort(); const nextDay = days.find(d => d > t); const nextN = nextDay ? P.itemsOf(sch[nextDay]).length : 0;
+  const sch = P.schedule(); const nextDay = Object.keys(sch).filter(d => d > t && sch[d].length).sort()[0]; const nextN = nextDay ? sch[nextDay].length : 0;
   const st = P.stats(); const back = '#/hoy' + (q.f ? '?f=' + q.f : '');
   const nav = `<div class="daynav"><button data-f="${addDays(day, -1)}" aria-label="Día anterior">${icon('chevL')}</button>${!isToday ? `<button data-f="${t}" style="width:auto;padding:0 12px;font-weight:600;font-size:13px">Hoy</button>` : ''}<button data-f="${addDays(day, 1)}" aria-label="Día siguiente">${icon('chevR')}</button></div>`;
-  app(`${head(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' }) + (isToday ? ' · hoy' : ''), isToday ? 'Hoy toca' : isPast ? 'Lo que tocaba' : 'Lo que toca', isToday ? 'El plan sale de tu Excel y se recalcula solo: lo que no hagas pasa a los días siguientes, y lo que adelantes libera días.' : isPast ? 'Lo que no hiciste ese día ya está recolocado en los días siguientes.' : 'Puedes adelantar estas tareas: márcalas al hacerlas y el plan se recalcula.', nav)}
-  <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${items.length ? `${items.length} tareas${mins ? ` · ~${Math.round(mins / 60 * 10) / 10} h pendientes` : ' · ¡todo hecho!'}` : 'Día libre o de repaso'}</div>
-    <div class="small muted">Quedan ${st.left} tareas en ${st.daysLeft} días${S.settings.examDate ? ` · examen el ${fmtDate(S.settings.examDate)}` : ' · pon la fecha del examen en Planning'}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
-  ${items.map(it => taskCard(it, day)).join('') || `<div class="card empty">${icon('repeat')}<div>${isPast ? 'Ese día no había tareas.' : 'No hay temario nuevo este día. Aprovecha para repasos y falladas.'}</div></div>`}
-  ${day === P.end() && P.finalNote ? `<div class="warnbox">${icon('alert')}<div><b>Repaso final (de tu Excel):</b><div style="white-space:pre-wrap">${esc(P.finalNote)}</div></div></div>` : ''}
-  ${isToday && nextN ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo de mañana?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
-  <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/planning">${icon('cal')} Fecha del examen</a></div>`);
+  app(`${head(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' }) + (isToday ? ' · hoy' : ''), isToday ? 'Hoy toca' : isPast ? 'Lo que tocaba' : 'Lo que toca', isToday ? 'Tu plan se recalcula solo: lo que no hagas pasa a los días siguientes y lo que adelantes te libera días.' : isPast ? 'Lo que no hiciste ese día ya está recolocado en los siguientes.' : 'Puedes adelantar estas tareas: márcalas al hacerlas y el plan se recalcula.', nav)}
+  <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${off ? 'Día libre: descansa 😌' : day >= P.examDate() ? 'Día del examen ✈ ¡Mucha suerte!' : items.length ? `${items.length} tareas${mins ? ` · ~${mins >= 60 ? (Math.round(mins / 6) / 10).toString().replace('.', ',') + ' h' : Math.round(mins) + ' min'} pendientes` : ' · ¡todo hecho!'}` : 'Sin temario nuevo: repasos y falladas'}${fin && !off ? ' · <span class="pill cyan">repaso final</span>' : ''}</div>
+    <div class="small muted">Quedan ${st.left} tareas de temario · examen el ${fmtDate(P.examDate(), { day: 'numeric', month: 'long' })}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
+  ${items.map(it => taskCard(it, day)).join('') || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
+  ${isToday && nextN && !off ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo siguiente?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
+  <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a></div>`);
   $$('[data-f]').forEach(b => b.onclick = () => { location.hash = '#/hoy?f=' + b.dataset.f; });
   const ad = $('#adel'); if (ad) ad.onclick = () => { const n = P.adelantar(); toast(n ? 'Añadido a hoy. El plan se ha recolocado.' : 'No hay más tareas'); render(); };
   bindTasks(items, back);
 };
 
-/* ---------- Mi plan (vista tipo Excel) ---------- */
-const PLAN_COLS = [['res', 'meteo', 'Meteo'], ['res', 'ffhh', 'FFHH'], ['res', 'carto', 'Carto'], ['res', 'nav', 'Nav'], ['res', 'aero', 'Aero'], ['res', 'fpl', 'Plan vuelo'], ['res', 'inst', 'Instit.'], ['psico', 'psico', 'Psicos'],
-  ['q', 'inst', 'Instit.'], ['q', 'oaci', 'Códigos'], ['q', 'meteo', 'Meteo'], ['q', 'carto', 'Carto'], ['q', 'nav', 'Nav'], ['q', 'fpl', 'Plan vuelo'], ['q', 'ffhh', 'FFHH'], ['q', 'aero', 'Aero']];
+/* ---------- Mi plan ---------- */
+const PLAN_COLS = [['res', 'meteo', 'Meteo'], ['res', 'ffhh', 'FFHH'], ['res', 'carto', 'Carto'], ['res', 'nav', 'Nav'], ['res', 'aero', 'Aero'], ['res', 'fpl', 'Plan vuelo'], ['res', 'inst', 'Instit.'], ['res', 'oaci', 'Códigos'],
+  ['q', 'meteo', 'Meteo'], ['q', 'ffhh', 'FFHH'], ['q', 'carto', 'Carto'], ['q', 'nav', 'Nav'], ['q', 'aero', 'Aero'], ['q', 'fpl', 'Plan vuelo'], ['q', 'inst', 'Instit.'], ['q', 'oaci', 'Códigos'], ['x', 'x', 'Diario']];
 routes['plan'] = () => {
-  const t = ymd(); const sch = P.schedule(); const st = P.stats();
-  const from = [P.firstDay(), ...Object.keys(S.ps || {})].sort()[0]; const end = P.end() < t ? t : P.end();
+  const t = ymd(); const st = P.stats(); const c = P.cfg();
+  const from = [c.start, ...Object.keys(S.ps || {})].sort()[0] < t ? [c.start, ...Object.keys(S.ps || {})].sort()[0] : t; const end = P.examDate();
   const dates = []; for (let d = from; d <= end; d = addDays(d, 1)) dates.push(d);
-  const itemsFor = d => {
-    const gis = d < t ? (S.ps[d]?.g || []) : (sch[d] || []); let its = P.itemsOf(gis);
-    if (d <= t) its = its.concat(P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === d && !gis.includes(it.gi)));
-    return its;
-  };
   const cls = (it, d) => P.done(it.key) ? 'c-done' : d < t ? 'c-miss' : d === t ? 'c-today' : 'c-fut';
+  const cache = {}; const itemsFor = d => cache[d] || (cache[d] = d === end ? [] : P.itemsFor(d));
   const strip = dates.map(d => { const its = itemsFor(d); const dn = its.filter(i => P.done(i.key)).length; const pc = its.length ? dn / its.length : 0;
-    const c = !its.length ? 'none' : d < t ? (pc === 1 ? 'full' : pc > 0 ? 'part' : 'miss') : d === t ? 'today' : 'fut';
-    return `<a class="hs ${c}" href="#/hoy?f=${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></a>`; }).join('');
-  const rows = dates.map(d => { const its = itemsFor(d); if (!its.length && d < t) return '';
-    const cells = PLAN_COLS.map(([k, tp]) => { const c = its.filter(i => i.k === k && i.t === tp); return `<td>${c.map(i => `<span class="pc ${cls(i, d)}">${esc(itemLabel(i))}</span>`).join('')}</td>`; }).join('');
+    const c2 = d === end ? 'exam' : P.isOff(d) ? 'off' : !its.length ? 'none' : d < t ? (pc === 1 ? 'full' : pc > 0 ? 'part' : 'miss') : d === t ? 'today' : P.isFinal(d) ? 'final' : 'fut';
+    return `<a class="hs ${c2}" href="#/hoy?f=${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></a>`; }).join('');
+  const rows = dates.map(d => { if (d === end) return ''; const its = itemsFor(d); if (!its.length && d < t) return '';
+    if (P.isOff(d)) return `<tr class="orow"><th>${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">Día libre</td></tr>`;
+    const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' p' : i.a + '–' + i.b) : itemLabel(i))}</span>`).join('')}</td>`; }).join('');
     return `<tr class="${d === t ? 'trow' : ''}"><th><a href="#/hoy?f=${d}">${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</a></th>${cells}</tr>`; }).join('');
-  app(`${head('Seguimiento', 'Mi plan', 'Tu Excel de seguimiento convertido en plan vivo. Lo que no haces se recoloca en los días siguientes y lo que adelantas libera días. Toca un día para ver sus tareas.')}
+  app(`${head('Seguimiento', 'Mi plan', 'Tu plan personalizado. Lo que no haces se recoloca en los días siguientes y lo que adelantas te libera días. Toca un día para ver sus tareas.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
   <div class="grid g4" style="margin-top:14px">
     <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
-    <div class="kpi"><div class="tiny">Quedan</div><div class="v">${st.left}</div><div class="s">tareas (${st.blocksLeft} días del Excel)</div></div>
-    <div class="kpi"><div class="tiny">Días hasta el final</div><div class="v">${st.daysLeft}</div><div class="s">${S.settings.examDate ? 'examen el ' + fmtDate(S.settings.examDate) : 'sin fecha de examen'}</div></div>
-    <div class="kpi"><div class="tiny">Ritmo necesario</div><div class="v">${st.perDay.toFixed(1)}</div><div class="s">tareas al día ${st.blocksLeft > st.daysLeft ? '<b class="c-ko">· vas justo</b>' : '<b class="c-ok">· vas bien</b>'}</div></div></div>
+    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">${st.left} tareas de temario</div></div>
+    <div class="kpi"><div class="tiny">Días de estudio</div><div class="v">${st.daysLeft}</div><div class="s">hasta el repaso final</div></div>
+    <div class="kpi"><div class="tiny">Ritmo</div><div class="v ${st.ok ? 'c-ok' : 'c-ko'}">${st.ok ? 'Vas bien' : 'Vas justo'}</div><div class="s">${st.ok ? `terminas el temario el ${fmtDate(st.finish)}` : `necesitas ${st.hoursLeft} h y tienes ${st.capHours} h`}</div></div></div>
+  ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}
   <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
   <h2>Calendario</h2>
   <div class="card"><div class="hstrip">${strip}</div>
-    <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span></div></div>
-  <h2>Día a día (como tu Excel)</h2>
-  <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="7" class="grp">Resúmenes (páginas)</th><th rowspan="2">Psicos</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th></tr>
-    <tr>${PLAN_COLS.filter(c => c[0] !== 'psico').map(c => `<th>${c[2]}</th>`).join('')}</tr></thead>
-    <tbody>${rows}${S.settings.examDate ? `<tr class="erow"><th>${fmtDate(S.settings.examDate, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="16">EXAMEN ✈</td></tr>` : ''}</tbody></table></div>
+    <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span><span><i class="lg final"></i>repaso final</span><span><i class="lg off"></i>libre</span><span><i class="lg exam"></i>examen</span></div></div>
+  <h2>Día a día</h2>
+  <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="8" class="grp">Resúmenes (páginas)</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th><th rowspan="2">Diario</th></tr>
+    <tr>${PLAN_COLS.filter(c2 => c2[0] !== 'x').map(c2 => `<th>${c2[2]}</th>`).join('')}</tr></thead>
+    <tbody>${rows}<tr class="erow"><th>${fmtDate(end, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">EXAMEN ✈</td></tr></tbody></table></div>
   <div class="small muted" style="margin-top:8px"><span class="pc c-done">verde</span> hecho · <span class="pc c-today">azul</span> hoy · <span class="pc c-fut">gris</span> pendiente · <span class="pc c-miss">ámbar</span> no hecho ese día (ya recolocado)</div>`);
+};
+
+/* ---------- Bienvenida y configuración del plan ---------- */
+let WZ = null;
+routes['bienvenida'] = (args, q) => {
+  const edit = !!q.edit && S.plan?.cfg;
+  if (!WZ || WZ.edit !== !!edit) WZ = { step: edit ? 1 : 0, edit: !!edit, c: P.cfg() };
+  const c = WZ.c; const N = 6;
+  const chip = (name, val, label, multi) => `<button class="chip ${multi ? ((c[name] || []).includes(val) ? 'on' : '') : (String(c[name]) === String(val) ? 'on' : '')}" data-n="${name}" data-v="${val}" data-m="${multi ? 1 : 0}">${label}</button>`;
+  const hm = m => m >= 60 ? (m % 60 ? `${Math.floor(m / 60)} h ${m % 60}` : `${m / 60} h`) : m ? `${m} min` : 'Libre';
+  const preview = () => {
+    S.plan = S.plan || {}; const old = S.plan.cfg, oldPs = S.ps; S.ps = {}; P._preview = true;
+    S.plan.cfg = Object.assign({}, c, { examDate: c.known == 0 ? '' : c.examDate, start: WZ.edit ? (old?.start || ymd()) : ymd() }); P._sig = '';
+    const st = P.stats(); st.exam = P.examDate();
+    S.plan.cfg = old; S.ps = oldPs; P._preview = false; P._sig = '';
+    return st;
+  };
+  const steps = [
+    () => `<div class="eyebrow">Bienvenido a OpoATC</div><h1>Así vas a preparar la Fase I</h1><p class="muted">Te hacemos 5 preguntas rápidas y creamos tu plan día a día. Puedes cambiarlo cuando quieras.</p>
+      <div class="how">${[['cal', 'Un plan que se recalcula solo', 'Cada día ves qué toca: páginas del resumen y, después, las preguntas de esas páginas. Si un día no llegas, lo pendiente se recoloca; si adelantas, te libera días.'],
+        ['repeat', 'Repaso 1 · 3 · 7', 'Lo que estudias hoy se te vuelve a preguntar mañana, a los 3 días y a los 7, para que se quede.'],
+        ['x', 'Las falladas vuelven', 'Cada pregunta que fallas vuelve a salir hasta que la aciertes dos veces seguidas.'],
+        ['exam', 'Exámenes reales', 'Exámenes oficiales de ENAIRE y simulacros con el formato real: 50 preguntas y −0,33 por fallo.'],
+        ['globe', 'Inglés y psicotécnicos', 'Según tu plan, cada día una dosis de inglés (con la regla explicada) y de psicotécnicos.'],
+        ['refresh', 'Móvil y PC', 'Todo se guarda en tu cuenta y se sincroniza entre dispositivos.']].map(([i, t, d]) => `<div class="howi"><div class="ico">${icon(i)}</div><div><b>${t}</b><p>${d}</p></div></div>`).join('')}</div>`,
+    () => `<div class="eyebrow">1 de 5 · Fecha</div><h1>¿Cuándo es tu examen?</h1><p class="muted">La prueba de conocimientos de la Fase I.</p>
+      <div class="chips">${chip('known', 1, 'Sé la fecha')}${chip('known', 0, 'Aún no la sé')}</div>
+      ${c.known == 0 ? `<label>¿Cuántas semanas quieres prepararte?</label><div class="chips">${[4, 6, 8, 10, 12, 16, 20, 26].map(w => chip('weeks', w, w + ' semanas')).join('')}</div>` : `<label>Fecha del examen</label><input type="date" id="wexd" value="${esc(c.examDate)}" min="${ymd()}">`}`,
+    () => `<div class="eyebrow">2 de 5 · Tiempo</div><h1>¿Cuánto tiempo tienes cada día?</h1><p class="muted">Sé realista: es mejor cumplir un plan corto que abandonar uno largo.</p>
+      <label>De lunes a viernes</label><div class="chips">${[30, 60, 90, 120, 180, 240, 300, 360].map(m => chip('minWeek', m, hm(m))).join('')}</div>
+      <label>Sábados y domingos</label><div class="chips">${[0, 60, 120, 180, 240, 300, 360].map(m => chip('minWeekend', m, hm(m))).join('')}</div>`,
+    () => `<div class="eyebrow">3 de 5 · Descanso</div><h1>Tus días libres</h1><p class="muted">Esos días no te pondremos temario.</p>
+      <label>Días libres cada semana</label><div class="chips">${[1, 2, 3, 4, 5, 6, 0].map(d => chip('off', d, ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][d], true)).join('')}</div>
+      <label>Además, un día extra de descanso…</label><div class="chips">${chip('restEvery', 0, 'Nunca')}${chip('restEvery', 2, 'Cada 2 semanas')}${chip('restEvery', 3, 'Cada 3 semanas')}${chip('restEvery', 4, 'Cada 4 semanas')}</div>
+      <label>Días de repaso final antes del examen (simulacros y falladas)</label><div class="chips">${[0, 3, 5, 7, 10, 14].map(d => chip('finalDays', d, d ? d + ' días' : 'Ninguno')).join('')}</div>`,
+    () => `<div class="eyebrow">4 de 5 · Punto de partida</div><h1>¿Cómo quieres enfocarlo?</h1>
+      <label>¿Desde dónde empiezas?</label><div class="chips">${chip('level', 'cero', 'Empiezo de cero')}${chip('level', 'repaso', 'Ya me lo he estudiado: quiero repasar')}</div>
+      <label>Orden de los temas</label><div class="chips">${chip('priority', 'recomendada', 'Recomendado: más Meteo, Navegación y FFHH')}${chip('priority', 'examen', 'Según lo que más cae en el examen')}${chip('priority', 'orden', 'En orden, del tema 1 al 9')}</div>
+      <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="went" ${c.entorno ? 'checked' : ''}><i></i></span> Incluir el tema 7 (Entorno profesional)</label>`,
+    () => { const st = preview(); return `<div class="eyebrow">5 de 5 · Tu plan</div><h1>${has('ingles') || has('psico') ? 'Práctica diaria y resumen' : 'Tu plan está listo'}</h1>
+      ${has('ingles') ? `<label>Inglés cada día de estudio</label><div class="chips">${[0, 10, 15, 20, 30, 45].map(m => chip('eng', m, m ? m + ' min' : 'No')).join('')}</div>` : ''}
+      ${has('psico') ? `<label>Psicotécnicos cada día de estudio</label><div class="chips">${[0, 10, 15, 20, 30, 45].map(m => chip('psico', m, m ? m + ' min' : 'No')).join('')}</div>` : ''}
+      <div class="sumbox"><div><b>${st.total}</b><span>tareas de temario</span></div><div><b>${st.hoursLeft} h</b><span>de estudio</span></div><div><b>${st.daysLeft}</b><span>días de estudio</span></div><div><b>${fmtDate(st.exam)}</b><span>examen</span></div></div>
+      ${st.ok ? `<p class="okmsg">${icon('check')} Con tu tiempo terminas el temario el <b>${fmtDate(st.finish, { day: 'numeric', month: 'long' })}</b> y te quedan días para el repaso final.</p>` : `<div class="warnbox">${icon('alert')}<div>No te da tiempo a todo: necesitas unas ${st.hoursLeft} h y tienes ${st.capHours} h. Puedes crear el plan igualmente (los días irán más cargados) o volver atrás y ajustar.</div></div>`}`; },
+  ];
+  if (c.known == null) c.known = c.examDate ? 1 : 0;
+  app(`<div class="wizard"><div class="wbar"><i style="width:${pct(WZ.step, N - 1)}%"></i></div><div class="card wcard">${steps[WZ.step]()}
+    <div class="row wnav">${WZ.step > (WZ.edit ? 1 : 0) ? `<button class="btn ghost" id="wb">${icon('chevL')} Atrás</button>` : WZ.edit ? `<a class="btn ghost" href="#/plan">Cancelar</a>` : ''}<span class="spacer"></span>
+    ${WZ.step < N - 1 ? `<button class="btn" id="wn">${WZ.step === 0 ? 'Empezar' : 'Siguiente'} ${icon('chevR')}</button>` : `<button class="btn" id="wsave">${icon('check')} ${WZ.edit ? 'Guardar y recalcular' : 'Crear mi plan'}</button>`}</div><div class="err" id="werr"></div></div></div>`);
+  $$('.chip[data-n]').forEach(b => b.onclick = () => { const n = b.dataset.n, v = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v;
+    if (b.dataset.m === '1') { const arr = new Set(c[n] || []); arr.has(v) ? arr.delete(v) : arr.add(v); c[n] = [...arr]; } else c[n] = v; render(); });
+  const ex = $('#wexd'); if (ex) ex.onchange = ex.onblur = () => { if (/^\d{4}-\d{2}-\d{2}$/.test(ex.value)) c.examDate = ex.value; };
+  const we = $('#went'); if (we) we.onchange = () => { c.entorno = we.checked; };
+  const back = $('#wb'); if (back) back.onclick = () => { WZ.step--; render(); };
+  const nx = $('#wn'); if (nx) nx.onclick = () => {
+    if (WZ.step === 1) { if (ex && /^\d{4}-\d{2}-\d{2}$/.test(ex.value)) c.examDate = ex.value; if (c.known == 1 && !(c.examDate > ymd())) { $('#werr').textContent = 'Elige una fecha futura o marca «Aún no la sé»'; return; } if (c.known == 0) c.examDate = ''; }
+    if (WZ.step === 3 && (c.off || []).length >= 7) { $('#werr').textContent = 'Deja al menos un día de estudio'; return; }
+    WZ.step++; render(); };
+  const sv = $('#wsave'); if (sv) sv.onclick = () => {
+    c.start = WZ.edit ? (S.plan.cfg.start || ymd()) : ymd(); if (c.known == 0) c.examDate = '';
+    S.plan = { cfg: c, u: now() }; S.settings.examDate = c.examDate || addDays(c.start, c.weeks * 7);
+    const t = ymd(); Object.keys(S.ps || {}).forEach(d => { if (d >= t) delete S.ps[d]; });
+    P._sig = ''; save(true); WZ = null; toast(edit ? 'Plan recalculado' : '¡Tu plan está listo!'); location.hash = '#/hoy';
+  };
 };
 
 /* ---------- Resúmenes ---------- */
@@ -644,12 +776,12 @@ routes['memorizar'] = (args, q) => {
   $$('[data-m]').forEach(b => b.onclick = () => { location.hash = `#/memorizar/${i}?m=${b.dataset.m}`; });
 };
 
-/* ---------- Temario subrayado ---------- */
+/* ---------- Temario oficial (lo esencial) ---------- */
 routes['temario'] = (args) => {
   const keys = Object.keys(D.tem).sort((a, b) => a - b); const n = args[0] || keys[0]; const page = args[1]; const T = D.tem[n];
-  app(`${head('Estudiar', 'Temario subrayado', 'Solo lo subrayado en amarillo de cada tema oficial, página a página. Es lo que entra.')}
+  app(`${head('Estudiar', 'Temario oficial', 'Lo esencial de cada tema oficial, página a página, para consultarlo rápido.')}
   <div class="chips" style="margin:14px 0">${keys.map(k => { const t = TOPICS.find(x => String(x.n) === k); return `<a class="chip ${k === n ? 'on' : ''}" href="#/temario/${k}">T${k} ${t ? t.short : ''}</a>`; }).join('')}</div>
-  <div class="card flat"><h3>${esc(T.name)}</h3><input id="f" placeholder="Buscar en lo subrayado…" style="margin-top:10px"></div><div id="pages"></div>`);
+  <div class="card flat"><h3>${esc(T.name)}</h3><input id="f" placeholder="Buscar en el temario…" style="margin-top:10px"></div><div id="pages"></div>`);
   const draw = f => {
     const re = f ? new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : null;
     $('#pages').innerHTML = T.pages.filter(([, t]) => !re || re.test(t)).map(([p, t]) => `<div class="hlblock" id="p${p}"><div class="p">PÁGINA ${p}</div>${re ? esc(t).replace(new RegExp(esc(f).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`) : esc(t)}</div>`).join('') || '<div class="empty">Sin resultados</div>';
@@ -668,14 +800,15 @@ routes['practicar'] = () => hub('Practicar', [
   ['aleatorio', 'shuffle', 'Preguntas a boleo', 'Infinitas, priorizando lo importante y lo que fallas'],
   ['cuestionarios', 'layers', 'Cuestionarios por tema', 'En orden y por bloques, con % completado'],
   ['repaso', 'repeat', 'Repaso 1 · 3 · 7 días', `${dueReviews().length} pendientes hoy`],
-  ['examenes', 'exam', 'Exámenes y simulacros', '11 exámenes oficiales + simulacros de 50'],
-  ['ingles', 'globe', 'Inglés', 'Grammar y vocabulary nivel C2 + simulacro C1'],
+  ['examenes', 'exam', 'Exámenes y simulacros', '10 exámenes oficiales + simulacros de 50'],
+  ['ingles', 'globe', 'Inglés', 'Grammar y vocabulary + exámenes tipo ENAIRE'],
+  ['psicotecnicos', 'brain', 'Psicotécnicos', 'Series, cálculo, atención y memoria'],
 ]);
 routes['mas'] = () => {
   hub('Más', [
     ['resumenes', 'book', 'Resúmenes', 'Tus apuntes dentro de la app'],
     ['memorizar', 'brain', 'Memorizar', 'Datos clave en modo huecos y tarjetas'],
-    ['temario', 'marker', 'Temario subrayado', 'Lo que entra, por página'],
+    ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
     ['plan', 'grid', 'Mi plan', 'Calendario de tu plan: hecho y pendiente'],
     ['cambios', 'alert', 'Cambios temario 2026', 'Lo que cambia en los temas nuevos'],
     ['planning', 'cal', 'Planning', 'Fecha de examen y lo estudiado'],
@@ -693,7 +826,6 @@ routes['aleatorio'] = () => {
     <div class="card"><div class="tiny">Temas</div><div class="chips" style="margin-top:10px">${TOPICS.map(t => `<button class="chip ${sel.has(t.id) ? 'on' : ''}" data-t="${t.id}">T${t.n} ${t.short}</button>`).join('')}</div>
     <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="selPri">Solo prioritarios</button><button class="btn ghost sm" id="selAll">Todos</button></div>
     <label>Fuente</label><select id="pool"><option value="both">Cuestionarios + exámenes oficiales</option><option value="cuest">Solo cuestionarios</option><option value="exam">Solo exámenes oficiales</option></select>
-    <label class="chk" style="margin-top:14px"><span class="switch"><input type="checkbox" id="onlyHl" ${S.settings.onlyHl ? 'checked' : ''}><i></i></span> Solo lo subrayado en amarillo</label>
     <div class="row" style="margin-top:18px"><span class="muted small"><b class="mono" style="color:var(--ink)">${n}</b> preguntas disponibles</span><span class="spacer"></span><button class="btn" id="go" ${n ? '' : 'disabled'}>${icon('play')} Empezar</button></div></div>`);
     $('#pool').value = S.settings.pool;
     const persist = () => localStorage.setItem('rnd_sel', JSON.stringify([...sel]));
@@ -701,7 +833,6 @@ routes['aleatorio'] = () => {
     $('#selPri').onclick = () => { sel.clear(); ['meteo', 'nav', 'ffhh', 'carto', 'fpl'].forEach(t => sel.add(t)); persist(); draw(); };
     $('#selAll').onclick = () => { TOPICS.forEach(t => sel.add(t.id)); persist(); draw(); };
     $('#pool').onchange = e => { S.settings.pool = e.target.value; save(true); draw(); };
-    $('#onlyHl').onchange = e => { S.settings.onlyHl = e.target.checked; save(true); draw(); };
     $('#go').onclick = () => startQuiz({ title: 'A boleo', next: weightedNext([...sel]), back: '#/aleatorio' });
   };
   draw();
@@ -716,15 +847,13 @@ routes['cuestionarios'] = (args) => {
     <div class="topics" style="margin-top:14px">${TOPICS.filter(x => D.q.some(q => q.t === x.id)).map(x => { const s = topicStats(x.id); return `<a class="topic" href="#/cuestionarios/${x.id}" style="--tc:${x.c}33"><div class="row" style="align-items:center">${ring(pct(s.seen, s.scope), 54, 6)}<div style="flex:1"><div class="n">TEMA ${x.n}</div><div class="nm" style="margin:0">${x.name}</div><div class="small muted">${s.seen}/${s.scope} hechas · ${pct(s.ok, s.seen)}% acierto</div></div></div></a>`; }).join('')}</div>`);
     return;
   }
-  const tp = TOP[t]; const all = D.q.filter(q => q.t === t); const qs = all.filter(q => !S.settings.onlyHl || inScope(Q[q.id]));
+  const tp = TOP[t]; const all = D.q.filter(q => q.t === t); const qs = all;
   const blocks = []; for (let i = 0; i < qs.length; i += BLOCK) blocks.push(qs.slice(i, i + BLOCK));
   const s = topicStats(t); const nextB = blocks.findIndex(b => b.some(q => !rec(q.id).n));
   app(`${head('Tema ' + tp.n, tp.name, '')}
-  <div class="card hl row" style="gap:18px">${ring(pct(s.seen, s.scope), 92, 9)}<div style="flex:1;min-width:200px"><div style="font-weight:700;font-size:17px">${pct(s.seen, s.scope)}% completado</div><div class="small muted">${s.seen}/${s.scope} preguntas · ${pct(s.ok, s.seen)}% acertadas la última vez</div>
-    <label class="chk" style="margin-top:10px"><span class="switch"><input type="checkbox" id="onlyHl" ${S.settings.onlyHl ? 'checked' : ''}><i></i></span> Solo subrayado (${all.filter(q => inScope(Q[q.id])).length} de ${all.length})</label></div>
+  <div class="card hl row" style="gap:18px">${ring(pct(s.seen, s.scope), 92, 9)}<div style="flex:1;min-width:200px"><div style="font-weight:700;font-size:17px">${pct(s.seen, s.scope)}% completado</div><div class="small muted">${s.seen}/${s.scope} preguntas · ${pct(s.ok, s.seen)}% acertadas la última vez</div></div>
     <div class="stack">${nextB >= 0 ? `<button class="btn" data-b="${nextB}">${icon('play')} Continuar · bloque ${nextB + 1}</button>` : '<span class="pill ok">Cuestionario completo</span>'}<button class="btn sec" id="failsT">Falladas del tema</button></div></div>
   <h2>Bloques</h2><div class="grid g4">${blocks.map((b, i) => { const seen = b.filter(q => rec(q.id).n).length, ok = b.filter(q => rec(q.id).last === 1).length; return `<button class="kpi" data-b="${i}" style="text-align:left;cursor:pointer;${seen === b.length ? 'border-color:rgba(52,211,153,.4)' : ''}"><div class="tiny">Bloque ${i + 1}</div><div style="font-weight:700;margin:4px 0">nº ${b[0].n}–${b[b.length - 1].n}</div><div class="bar ${seen === b.length ? 'ok' : ''}"><i style="width:${pct(seen, b.length)}%"></i></div><div class="s">${seen}/${b.length} · ${pct(ok, seen)}% ✓</div></button>`; }).join('')}</div>`);
-  $('#onlyHl').onchange = e => { S.settings.onlyHl = e.target.checked; save(true); render(); };
   $$('[data-b]').forEach(b => b.onclick = () => startQuiz({ title: `${tp.short} · bloque ${+b.dataset.b + 1}`, list: blocks[+b.dataset.b].map(q => q.id), studyTopic: t, back: '#/cuestionarios/' + t }));
   $('#failsT').onclick = () => { const ids = pendingFails().filter(id => Q[id].t === t); if (!ids.length) return toast('No tienes falladas pendientes en este tema'); startQuiz({ title: 'Falladas · ' + tp.short, list: shuffle(ids), back: '#/cuestionarios/' + t }); };
 };
@@ -826,8 +955,121 @@ function submitExam() {
   $('#rev').onclick = () => { $('#review').innerHTML = z.ids.map((id, i) => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; return `<div class="card"><div class="small muted">${i + 1} · ${esc(q.src || '')}</div><div class="qtext" style="font-size:16px">${esc(q.q)}</div>${q.o.map((o, k) => `<div class="opt ${k === q.a ? 'ok' : k === a ? 'ko' : ''}" style="cursor:default"><span class="l">${L[k].toUpperCase()}</span><span>${esc(o)}</span></div>`).join('')}${a == null ? '<div class="small muted">En blanco</div>' : ''}${q.r ? `<div class="rule ${a === q.a ? '' : 'open'}"><div class="rh">${icon('book')} Regla</div><div>${esc(q.r)}</div></div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}</div>`; }).join(''); };
 }
 
+/* ---------- Psicotécnicos (ejercicios generados, infinitos) ---------- */
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const AZ = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ';
+const azAt = i => AZ[((i % 27) + 27) % 27];
+function opts4(correct, wrong) {
+  const set = new Set([String(correct)]); let g = 0;
+  while (set.size < 4 && g++ < 80) { const w = String(wrong()); if (w && w !== 'NaN') set.add(w); }
+  const o = shuffle([...set]); return { o, a: o.indexOf(String(correct)) };
+}
+const near = (c, spread = 6) => () => c + pick([-1, 1]) * rnd(1, spread);
+const CALLS = ['IBE', 'VLG', 'RYR', 'AEA', 'EZY', 'ANE', 'BAW', 'DLH', 'AFR', 'KLM', 'SWR', 'TAP', 'IBS', 'UAE'];
+const callsign = () => pick(CALLS) + rnd(10, 9899);
+const squawk = () => Array.from({ length: 4 }, () => rnd(0, 7)).join('');
+const PSY = {
+  num: { name: 'Series numéricas', ic: 'chart', d: 'Descubre la regla y elige el número que sigue', gen() {
+    const k = rnd(0, 5); let s = [], why = '';
+    if (k === 0) { const a = rnd(2, 60), d = pick([3, 4, 6, 7, 8, 9, 11, 12, 13, -3, -4, -7]); for (let i = 0; i < 6; i++) s.push(a + d * i); why = `Se ${d > 0 ? 'suma' : 'resta'} ${Math.abs(d)} cada vez.`; }
+    else if (k === 1) { const a = rnd(1, 6), r = pick([2, 3]); for (let i = 0; i < 6; i++) s.push(a * r ** i); why = `Cada término se multiplica por ${r}.`; }
+    else if (k === 2) { const a = rnd(1, 20), d0 = rnd(1, 5), inc = rnd(1, 3); let v = a; for (let i = 0; i < 6; i++) { s.push(v); v += d0 + inc * i; } why = `Las diferencias crecen de ${inc} en ${inc}: +${d0}, +${d0 + inc}, +${d0 + 2 * inc}…`; }
+    else if (k === 3) { const a = rnd(1, 20), b = rnd(30, 70), d1 = rnd(2, 6), d2 = -rnd(2, 6); for (let i = 0; i < 7; i++) s.push(i % 2 ? b + d2 * ((i - 1) / 2) : a + d1 * (i / 2)); why = `Son dos series intercaladas: una suma ${d1} y la otra resta ${-d2}.`; }
+    else if (k === 4) { const m = pick([2, 3]), c = pick([1, -1, 2, -2]); let v = rnd(1, 5); for (let i = 0; i < 5; i++) { s.push(v); v = v * m + c; } why = `Cada término es el anterior ×${m} ${c > 0 ? '+' : '−'} ${Math.abs(c)}.`; }
+    else { const c = rnd(-3, 5), st = rnd(1, 4); for (let i = 0; i < 6; i++) s.push((st + i) ** 2 + c); why = `Son cuadrados consecutivos (${st}², ${st + 1}²…) ${c ? (c > 0 ? '+ ' : '− ') + Math.abs(c) : ''}.`; }
+    const ans = s.pop(); const { o, a } = opts4(ans, near(ans, Math.max(3, Math.round(Math.abs(ans) * 0.15))));
+    return { q: `${s.join(' · ')} · <b>?</b>`, o, a, why };
+  } },
+  let: { name: 'Series de letras', ic: 'layers', d: 'Alfabeto español de 27 letras (con Ñ)', gen() {
+    const k = rnd(0, 2); let s = [], why = ''; const st = rnd(0, 26);
+    if (k === 0) { const d = pick([2, 3, 4, 5, -2, -3]); for (let i = 0; i < 6; i++) s.push(azAt(st + d * i)); why = `Se ${d > 0 ? 'avanzan' : 'retroceden'} ${Math.abs(d)} letras cada vez.`; }
+    else if (k === 1) { const d1 = rnd(1, 3), d2 = rnd(2, 4); let v = st; for (let i = 0; i < 6; i++) { s.push(azAt(v)); v += i % 2 ? d2 : d1; } why = `Se alterna avanzar ${d1} y ${d2} letras.`; }
+    else { let v = st; for (let i = 0; i < 6; i++) { s.push(azAt(v)); v += i + 1; } why = 'Los saltos crecen: +1, +2, +3, +4…'; }
+    const ans = s.pop(); const idx = AZ.indexOf(ans); const { o, a } = opts4(ans, () => azAt(idx + pick([-1, 1]) * rnd(1, 3)));
+    return { q: `${s.join(' · ')} · <b>?</b>`, o, a, why };
+  } },
+  calc: { name: 'Cálculo rápido', ic: 'target', d: 'Porcentajes, velocidad, tiempo y distancia', gen() {
+    const k = rnd(0, 5); let q, ans, why;
+    if (k === 0) { const p = pick([5, 10, 15, 20, 25, 30, 40, 75]), b = rnd(2, 40) * 20; ans = p * b / 100; q = `¿Cuánto es el ${p} % de ${b}?`; why = `${b} × ${p} / 100 = ${ans}.`; }
+    else if (k === 1) { const v = pick([240, 300, 360, 420, 480, 540, 600]), m = pick([5, 10, 15, 20, 30, 40, 45]); ans = v * m / 60; q = `Un avión vuela a ${v} kt. ¿Cuántas NM recorre en ${m} minutos?`; why = `${v} NM/h ÷ 60 = ${v / 60} NM/min × ${m} = ${ans} NM.`; }
+    else if (k === 2) { const v = pick([240, 300, 360, 420, 480, 600]), d = (v / 60) * pick([4, 6, 8, 10, 12, 15]); ans = d / (v / 60); q = `A ${v} kt, ¿cuántos minutos tarda en recorrer ${d} NM?`; why = `${v} kt = ${v / 60} NM/min → ${d} ÷ ${v / 60} = ${ans} min.`; }
+    else if (k === 3) { const fl = rnd(10, 40) * 10, r = pick([1000, 1500, 2000, 2500, 3000]), to = fl - pick([40, 60, 80, 100, 120]); ans = (fl - to) * 100 / r; if (!Number.isInteger(ans)) return PSY.calc.gen(); q = `Desciende de FL${fl} a FL${to} a ${r} ft/min. ¿Cuántos minutos tarda?`; why = `${(fl - to) * 100} ft ÷ ${r} ft/min = ${ans} min.`; }
+    else if (k === 4) { const a = rnd(12, 99), b = rnd(3, 9); ans = a * b; q = `${a} × ${b} = ?`; why = `${a} × ${b} = ${ans}.`; }
+    else { const h = rnd(6, 21), m = pick([5, 10, 15, 20, 35, 40, 50]), add = pick([25, 35, 45, 50, 55, 70, 85, 95]); const t = h * 60 + m + add; ans = `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; q = `Despega a las ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} y el vuelo dura ${add} min. ¿Hora de llegada?`; why = `${h}:${String(m).padStart(2, '0')} + ${add} min = ${ans}.`;
+      const { o, a } = opts4(ans, () => { const w = t + pick([-1, 1]) * pick([5, 10, 15, 60]); return `${String(Math.floor(w / 60) % 24).padStart(2, '0')}:${String(w % 60).padStart(2, '0')}`; }); return { q, o, a, why }; }
+    const { o, a } = opts4(ans, near(ans, Math.max(2, Math.round(Math.abs(ans) * 0.12)))); return { q, o, a, why };
+  } },
+  aten: { name: 'Atención y percepción', ic: 'search', d: 'Compara datos de vuelo y encuentra las diferencias', gen() {
+    if (Math.random() < 0.6) {
+      const rows = Array.from({ length: 4 }, () => [callsign(), squawk(), 'FL' + rnd(10, 41) * 10]);
+      const nd = rnd(0, 3); const idx = shuffle([0, 1, 2, 3]).slice(0, nd);
+      const alt = rows.map((r, i) => { if (!idx.includes(i)) return r.slice(); const c = r.slice(), f = rnd(0, 2), str = c[f].split(''); const p = rnd(f === 2 ? 2 : 3, str.length - 1); const ch = str[p]; let n; do { n = String(rnd(0, f === 1 ? 7 : 9)); } while (n === ch); str[p] = n; c[f] = str.join(''); return c; });
+      const tb = rows.map((r, i) => `<tr><td class="mono">${r.join('  ')}</td><td class="mono">${alt[i].join('  ')}</td></tr>`).join('');
+      return { q: `¿En cuántas filas NO coinciden las dos columnas?<table class="tbl psy-tb">${tb}</table>`, o: ['0', '1', '2', '3'], a: nd, why: nd ? `Difieren las filas ${idx.sort().map(i => i + 1).join(', ')}.` : 'Todas las filas coinciden.' };
+    }
+    const sym = pick(['7', 'K', 'Ñ', '3', 'X']); const pool = sym.match(/\d/) ? '0123456789' : 'KXÑNMHZ';
+    const s = Array.from({ length: 36 }, () => Math.random() < 0.2 ? sym : pick(pool.replace(sym, '').split(''))).join('');
+    const n = s.split(sym).length - 1; const { o, a } = opts4(n, near(n, 2));
+    return { q: `¿Cuántas veces aparece «${sym}»?<div class="mono psy-str">${s.match(/.{1,12}/g).join('<br>')}</div>`, o, a, why: `Aparece ${n} veces.` };
+  } },
+  mem: { name: 'Memoria', ic: 'brain', d: 'Memoriza un tráfico 15 s y responde', memo: true, gen() {
+    const fl = shuffle(Array.from({ length: 30 }, (_, i) => 'FL' + (100 + i * 10))).slice(0, 5);
+    const rows = fl.map(f => ({ c: callsign(), sq: squawk(), f }));
+    const t = pick(rows), k = rnd(0, 1);
+    const q = k ? `¿Qué nivel tenía ${t.c}?` : `¿Qué squawk tenía ${t.c}?`;
+    const ans = k ? t.f : t.sq; const others = rows.filter(r => r !== t).map(r => k ? r.f : r.sq);
+    const o = shuffle([ans, ...shuffle(others).slice(0, 3)]);
+    return { memo: `<table class="tbl psy-tb">${rows.map(r => `<tr><td class="mono"><b>${r.c}</b></td><td class="mono">${r.sq}</td><td class="mono">${r.f}</td></tr>`).join('')}</table>`, q, o, a: o.indexOf(ans), why: `${t.c}: squawk ${t.sq}, ${t.f}.` };
+  } },
+};
+let PZ = null;
+function psyStat(k) { return S.psy?.[k] || { n: 0, ok: 0 }; }
+function psyRecord(k, ok) { S.psy = S.psy || {}; const r = Object.assign({ n: 0, ok: 0 }, S.psy[k]); r.n++; if (ok) r.ok++; r.u = now(); S.psy[k] = r; save(); }
+routes['psicotecnicos'] = (args) => {
+  if (!has('psico')) return locked('psico', 'Psicotécnicos', 'Los psicotécnicos están en el plan Teoría + Inglés + Psicotécnicos: series numéricas y de letras, cálculo, atención y memoria, infinitos y cronometrados.');
+  if (args[0] && (PSY[args[0]] || args[0] === 'mix')) { PZ = { k: args[0], i: 0, n: args[0] === 'mix' ? 30 : 15, ok: 0, t0: now(), limit: args[0] === 'mix' ? 15 * 60 : 0 }; return psyNext(); }
+  PZ = null;
+  app(`${head('Practicar', 'Psicotécnicos', 'Ejercicios generados al momento: nunca se acaban ni se repiten igual. Haz unos minutos cada día; la velocidad se entrena.')}
+  <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
+  <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
+};
+function psyNext() {
+  const z = PZ; if (!z) return;
+  if (z.i >= z.n || (z.limit && (now() - z.t0) / 1000 > z.limit)) return psyEnd();
+  const k = z.k === 'mix' ? pick(Object.keys(PSY)) : z.k; z.cur = Object.assign({ k }, PSY[k].gen()); z.chosen = null; z.i++;
+  if (z.cur.memo) { z.memoUntil = now() + 15000; psyMemo(); } else psyDraw();
+}
+function psyMemo() {
+  const z = PZ; if (!z || !z.cur.memo) return; const left = Math.ceil((z.memoUntil - now()) / 1000);
+  if (left <= 0) return psyDraw();
+  app(`${psyTop()}<div class="card"><div class="tiny">Memoriza · ${left} s</div>${z.cur.memo}<button class="btn ghost sm" id="memoGo" style="margin-top:10px">Ya lo tengo</button></div>`);
+  $('#memoGo').onclick = () => { z.memoUntil = 0; psyDraw(); };
+  clearTimeout(z.h); z.h = setTimeout(() => { if (PZ === z && z.memoUntil) psyMemo(); }, 1000);
+}
+function psyTop() {
+  const z = PZ; const tl = z.limit ? Math.max(0, z.limit - Math.round((now() - z.t0) / 1000)) : null;
+  return `<div class="qtop"><a class="btn ghost sm" href="#/psicotecnicos">${icon('chevL')}</a><div class="bar"><i style="width:${pct(z.i - 1, z.n)}%"></i></div><span class="mono small muted">${z.i}/${z.n}</span>${tl != null ? `<span class="pill" id="psyT">${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}</span>` : ''}<span class="pill ok">✓ ${z.ok}</span></div>`;
+}
+function psyDraw() {
+  const z = PZ, c = z.cur, done = z.chosen != null, ok = done && z.chosen === c.a; clearTimeout(z.h);
+  app(`${psyTop()}<div class="card"><div class="qmeta"><span class="pill">${PSY[c.k].name}</span></div><div class="qtext">${c.q}</div>
+    ${c.o.map((o, i) => `<button class="opt ${done ? (i === c.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
+    ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto'} · ${esc(c.why)}</div></div>` : ''}</div>
+    <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>`);
+  $$('.opt').forEach(b => b.onclick = () => { z.chosen = +b.dataset.i; const g = z.chosen === c.a; if (g) z.ok++; psyRecord(c.k, g); psyDraw(); });
+  $('#nextBtn').onclick = psyNext; $('#endBtn').onclick = psyEnd;
+  if (z.limit) z.h = setTimeout(function tick() { if (PZ !== z) return; const el = $('#psyT'); const tl = z.limit - Math.round((now() - z.t0) / 1000); if (tl <= 0) return psyEnd(); if (el) el.textContent = `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`; z.h = setTimeout(tick, 1000); }, 1000);
+}
+function psyEnd() {
+  const z = PZ; if (!z) return; clearTimeout(z.h); z.done = true; const n = z.i - (z.chosen == null ? 1 : 0);
+  app(`${head('Psicotécnicos', 'Resultado', '')}<div class="card hl row" style="gap:18px">${ring(pct(z.ok, n || 1), 92, 9)}<div><div style="font-weight:700;font-size:17px">${z.ok} de ${n} correctas</div><div class="small muted">${Math.round((now() - z.t0) / 1000)} s · ${n ? Math.round((now() - z.t0) / 1000 / n) : 0} s por ejercicio</div></div></div>
+  <div class="row"><a class="btn" href="#/psicotecnicos/${z.k}">${icon('repeat')} Otra tanda</a><a class="btn sec" href="#/psicotecnicos">Volver</a></div>`);
+}
+
 /* ---------- Inglés ---------- */
 routes['ingles'] = () => {
+  if (!has('ingles')) return locked('ingles', 'Inglés', 'El inglés está en los planes Teoría + Inglés y Completo: preguntas tipo examen de ENAIRE con la regla gramatical explicada después de cada respuesta.');
   const ids = s => Object.values(Q).filter(q => q.kind === 'eng' && q.sub === s).map(q => q.id);
   const st = s => { const l = ids(s); const seen = l.filter(i => rec(i).n); return { n: l.length, seen: seen.length, ok: seen.filter(i => rec(i).last === 1).length }; };
   const engNext = subs => z => {
@@ -866,8 +1108,8 @@ routes['planning'] = () => {
   <div class="card"><div class="grid">
     <div><label>Fecha del examen</label><input type="date" id="exd" value="${st.examDate || ''}"></div>
     <div><label>Cuenta atrás</label><div class="mono" id="cdown" style="font-size:26px;font-weight:800;padding-top:4px">${days ? days + ' días' : '—'}</div></div>
-    ${st.examDate ? '' : `<div><label>Sin fecha: duración del plan (días)</label><input type="number" id="plen" min="7" max="200" value="${P.len()}"></div>`}</div>
-    <div class="row" style="margin-top:12px"><a class="btn sec sm" href="#/plan">${icon('grid')} Ver mi plan</a><span class="small muted">El temario termina la víspera del examen. Lo que no hagas un día se recoloca solo.</span></div></div>
+    </div>
+    <div class="row" style="margin-top:12px"><a class="btn sec sm" href="#/plan">${icon('grid')} Ver mi plan</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a><span class="small muted">Lo que no hagas un día se recoloca solo.</span></div></div>
   <h2>Avance del temario</h2>
   <div class="card tblwrap"><table class="tbl"><tr><th>Tema</th><th>Págs. resumen</th><th>Estudiadas</th><th>Ritmo</th><th>Cuestionario</th></tr>
   ${rows.map(r => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${r.t.c};margin-right:8px"></span>${r.t.short}</td><td><input type="number" min="0" style="width:72px;padding:6px 8px" data-pg="${r.t.id}" value="${r.total}"></td><td class="mono">${r.done}/${r.total || '?'}</td><td class="mono small">${r.perDay != null ? (r.perDay ? r.perDay.toFixed(1) + '/día' : '✓') : '—'}</td><td class="mono">${pct(r.s.seen, r.s.scope)}%</td></tr>`).join('')}</table></div>
@@ -884,10 +1126,9 @@ routes['planning'] = () => {
   ${logs.length ? `<div class="card tblwrap"><table class="tbl"><tr><th>Día</th><th>Tema</th><th>Págs</th><th>Preg.</th><th>Nota</th><th></th></tr>${logs.slice(0, 80).map(l => `<tr><td>${fmtDate(l.d)}</td><td>${esc(TOP[l.topic]?.short || tname(l.topic))}</td><td class="mono">${l.pf ? l.pf + '–' + (l.pt || l.pf) : ''}</td><td class="mono">${l.qf ? l.qf + '–' + l.qt : ''}</td><td class="small">${esc(l.note || '')}</td><td><a href="#" data-del="${l.id}" class="muted">✕</a></td></tr>`).join('')}</table></div>` : '<p class="muted">Nada apuntado todavía.</p>'}`);
   // Fecha: se guarda al terminar de escribirla (blur/Enter), no en cada tecla, para que no se repinte la página a mitad del año
   const exd = $('#exd'); let exdDirty = false;
-  exd.oninput = exd.onchange = () => { exdDirty = true; const v = exd.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 2025) { st.examDate = v; save(true); $('#cdown').textContent = Math.max(1, Math.ceil((new Date(v + 'T09:00:00') - now()) / DAY)) + ' días'; } };
+  exd.oninput = exd.onchange = () => { exdDirty = true; const v = exd.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 2025) { st.examDate = v; if (S.plan?.cfg) { S.plan.cfg.examDate = v; S.plan.cfg.known = 1; S.plan.u = now(); P._sig = ''; } save(true); $('#cdown').textContent = Math.max(1, Math.ceil((new Date(v + 'T09:00:00') - now()) / DAY)) + ' días'; } };
   exd.onblur = () => { if (exdDirty) render(); };
   exd.onkeydown = e => { if (e.key === 'Enter') exd.blur(); };
-  const pl = $('#plen'); if (pl) pl.onchange = e => { st.planLen = Math.max(7, Math.min(200, +e.target.value || 31)); save(true); render(); };
   $$('[data-pg]').forEach(i => i.onchange = () => { st.pages[i.dataset.pg] = +i.value; save(true); render(); });
   $('#addLog').onclick = () => {
     const l = { id: uid(), d: $('#ld').value || ymd(), topic: $('#lt').value, pf: +$('#pf').value || 0, pt: +$('#pt').value || +$('#pf').value || 0, qf: +$('#qf').value || 0, qt: +$('#qt').value || +$('#qf').value || 0, note: $('#ln').value, u: now() };
@@ -926,94 +1167,80 @@ routes['stats'] = () => {
   ${TOPICS.map(t => `<tr><td>${t.short}</td>${dist.map(d => { const v = pct(d.c[t.id] || 0, d.n); return `<td><div class="row" style="gap:8px;flex-wrap:nowrap"><div class="bar" style="width:70px;margin:0"><i style="width:${Math.min(100, v * 4)}%;background:${t.c}"></i></div><span class="mono small">${v}%</span></div></td>`; }).join('')}</tr>`).join('')}</table></div>`);
 };
 
-/* ---------- Ajustes ---------- */
+/* ---------- Ajustes y cuenta ---------- */
+const PLAN_NAMES = { teoria: 'Fase I · Teoría', ingles: 'Fase I · Teoría + Inglés', completo: 'Fase I · Teoría + Inglés + Psicotécnicos' };
+function accountCard() {
+  const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.name || SESS.user;
+  const pl = ME.plan; const active = pl && ['active', 'trialing', 'past_due'].includes(pl.status);
+  const planLine = ME.admin ? 'Administrador · acceso completo' : ME.comp ? `${PLAN_NAMES[ME.comp] || 'Acceso completo'} · código de acceso` : active ? `${PLAN_NAMES[pl.id] || pl.id}${pl.cancelAt ? ` · se cancela el ${new Date(pl.cancelAt * 1000).toLocaleDateString('es-ES')}` : pl.end ? ` · se renueva el ${new Date(pl.end * 1000).toLocaleDateString('es-ES')}` : ''}` : 'Acceso completo';
+  return `<div class="card"><div class="row"><div class="avatar" style="width:46px;height:46px;font-size:17px">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:700">${esc(nm)}</div><div class="small muted">${esc(ME.email || SESS.user)} · sincronizado entre dispositivos</div></div>
+    <button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button></div>
+    <div class="planbox"><div><div class="tiny">Tu plan</div><div style="font-weight:700;margin-top:2px">${esc(planLine)}</div></div><span class="spacer"></span>
+    ${active && pl.cust ? `<button class="btn sec sm" id="portal">${icon('gear')} Gestionar o cancelar suscripción</button>` : ''}
+    ${!has('psico') ? `<a class="btn sm" href="#/mejorar">${icon('star')} Mejorar plan</a>` : ''}</div>
+    ${ME.google ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>`;
+}
+routes['cuenta'] = () => routes['ajustes']();
 routes['ajustes'] = () => {
   const st = S.settings;
   app(`${head('Cuenta', 'Ajustes', '')}
-  <div class="card"><div class="row"><div class="avatar" style="width:46px;height:46px;font-size:17px">${esc(initials(SESS.name || SESS.user))}</div><div style="flex:1"><div style="font-weight:700">${esc(SESS.name || 'Invitado')}</div><div class="small muted">${SESS.local ? 'Sin cuenta · solo este dispositivo' : '@' + esc(SESS.user) + ' · sincronizado entre dispositivos'}</div></div>
-  ${SESS.local ? `<button class="btn" id="toAcc">Crear cuenta / entrar</button>` : `<button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button>`}</div>
-  ${SESS.local ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>
+  ${accountCard()}
   <div id="invCard"></div>
   <div class="card row"><div style="flex:1"><h3>Apariencia</h3><div class="small muted">Se guarda en este dispositivo</div></div><div class="seg"><button data-th="light" class="${theme() === 'light' ? 'on' : ''}">Claro</button><button data-th="dark" class="${theme() === 'dark' ? 'on' : ''}">Oscuro</button></div></div>
   <div class="card"><h3>Prioridad de cada tema</h3><p class="small muted">Cuánto sale cada tema en «A boleo» y en el simulacro «con mis prioridades». 0 = no sale.</p>
   ${TOPICS.map(t => `<div class="row" style="flex-wrap:nowrap;margin:6px 0"><span style="min-width:120px" class="small">${t.short}</span><input type="range" min="0" max="5" step="0.5" value="${st.weights[t.id] ?? 0}" data-w="${t.id}" style="flex:1"><b class="mono" id="wv-${t.id}" style="width:30px;text-align:right">${st.weights[t.id] ?? 0}</b></div>`).join('')}
-  <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="wReal">Proporción real 2023-25</button><button class="btn ghost sm" id="wDef">Mis prioridades (Meteo/Nav/FFHH)</button></div></div>
-  <div class="card"><h3>Examen</h3><div class="grid"><div><label>Penalización por fallo</label><select id="pen"><option value="0">Sin penalización</option><option value="0.25">−0,25</option><option value="0.33">−0,33 (oficial)</option><option value="0.5">−0,5</option></select></div><div><label>Minutos del simulacro</label><input type="number" id="mins" value="${st.simMinutes}"></div></div>
-  <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="onlyHl" ${st.onlyHl ? 'checked' : ''}><i></i></span> Solo preguntas de lo subrayado en amarillo</label></div>
-  <div class="card"><h3>Copia de seguridad</h3><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="exp">Exportar progreso</button><label class="btn ghost sm" style="margin:0">Importar<input type="file" id="imp" accept=".json" hidden></label><span class="spacer"></span><button class="btn danger sm" id="rst">Borrar progreso</button></div></div>`);
-  if (!SESS.local) api('me').then(me => { if (me?.admin) loadInvites(); }).catch(() => {});
+  <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="wReal">Proporción real 2023-25</button><button class="btn ghost sm" id="wDef">Prioridad recomendada</button></div></div>
+  <div class="card"><h3>Examen</h3><div class="grid"><div><label>Penalización por fallo</label><select id="pen"><option value="0">Sin penalización</option><option value="0.25">−0,25</option><option value="0.33">−0,33 (oficial)</option><option value="0.5">−0,5</option></select></div><div><label>Minutos del simulacro</label><input type="number" id="mins" value="${st.simMinutes}"></div></div></div>
+  <div class="card"><h3>Tus datos</h3><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="exp">Exportar progreso</button><label class="btn ghost sm" style="margin:0">Importar<input type="file" id="imp" accept=".json" hidden></label><span class="spacer"></span><button class="btn ghost sm" id="rst">Borrar progreso</button><button class="btn danger sm" id="del">Eliminar cuenta</button></div>
+  <p class="small muted" style="margin-top:10px"><a href="legal.html#terminos" target="_blank">Términos</a> · <a href="legal.html#privacidad" target="_blank">Privacidad</a> · OpoATC no tiene relación con ENAIRE.</p></div>`);
+  if (ME.admin) loadInvites();
   $$('[data-th]').forEach(b => b.onclick = () => { localStorage.setItem(THEME_KEY, b.dataset.th); applyTheme(true); render(); });
   $('#pen').value = String([0, 0.25, 0.33, 0.5].reduce((a, b) => Math.abs(b - st.penalty) < Math.abs(a - st.penalty) ? b : a));
-  const ta = $('#toAcc'); if (ta) ta.onclick = () => { SESS = null; localStorage.removeItem(SESS_KEY); boot('register'); };
-  const sn = $('#syncNow'); if (sn) sn.onclick = () => sync(true);
-  const o = $('#out'); if (o) o.onclick = () => { if (confirm('¿Cerrar sesión en este dispositivo?')) logout(); };
+  $('#syncNow').onclick = () => sync(true);
+  $('#out').onclick = () => { if (confirm('¿Cerrar sesión en este dispositivo?')) logout(); };
+  const pt = $('#portal'); if (pt) pt.onclick = async () => { try { await OPO.portal(); } catch (e) { toast(e.message); } };
   const cp = $('#chp'); if (cp) cp.onclick = async () => { try { await api('password', { method: 'POST', body: { old: $('#op').value, pass: $('#np').value } }); toast('Contraseña cambiada'); render(); } catch (e) { toast(e.message); } };
   $$('[data-w]').forEach(r => r.oninput = () => { st.weights[r.dataset.w] = +r.value; $('#wv-' + r.dataset.w).textContent = r.value; save(true); });
   $('#wReal').onclick = () => { const s = realShares(); TOPICS.forEach(t => st.weights[t.id] = Math.round((s[t.id] || 0) * 20) / 2); save(true); render(); };
   $('#wDef').onclick = () => { TOPICS.forEach(t => st.weights[t.id] = t.w); save(true); render(); };
   $('#pen').onchange = e => { st.penalty = +e.target.value; save(true); };
   $('#mins').onchange = e => { st.simMinutes = Math.max(5, +e.target.value || 50); save(true); };
-  $('#onlyHl').onchange = e => { st.onlyHl = e.target.checked; save(true); };
-  $('#exp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S)], { type: 'application/json' })); a.download = 'opo-atc-progreso-' + ymd() + '.json'; a.click(); };
+  $('#exp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S)], { type: 'application/json' })); a.download = 'opoatc-progreso-' + ymd() + '.json'; a.click(); };
   $('#imp').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { mergeState(S, JSON.parse(await f.text())); save(); toast('Importado'); render(); } catch (er) { toast('Archivo no válido'); } };
   $('#rst').onclick = () => { if (confirm('¿Borrar todo tu progreso? No se puede deshacer.') && confirm('¿Seguro del todo?')) { S = defaultState(); S.migrated = 1; S.settings.u = now(); localStorage.setItem(stateKey(), JSON.stringify(S)); api('sync', { method: 'PUT', body: JSON.stringify(S) }).catch(() => {}); render(); } };
+  $('#del').onclick = async () => { if (!confirm('¿Eliminar tu cuenta y todo tu progreso? Si tienes una suscripción activa se cancelará. No se puede deshacer.')) return; if (prompt('Escribe ELIMINAR para confirmar') !== 'ELIMINAR') return; try { await api('account/delete', { method: 'POST' }); localStorage.removeItem(stateKey()); logout(); } catch (e) { toast(e.message); } };
+};
+
+/* ---------- Mejorar plan ---------- */
+routes['mejorar'] = () => {
+  app(`${head('Cuenta', 'Mejora tu plan', 'Cambia de plan cuando quieras. Se ajusta automáticamente en tu próxima factura.')}${OPO.planCards ? OPO.planCards(ME.comp || ME.plan?.id, null) : ''}`);
+  $$('[data-plan]').forEach(b => b.onclick = async () => { b.disabled = true; try { await OPO.checkout(b.dataset.plan); } catch (e) { toast(e.message); b.disabled = false; } });
+};
+const locked = (feature, title, text) => {
+  const need = feature === 'ingles' ? 'ingles' : 'completo';
+  app(`${head('Plan', title, '')}<div class="card hl lockcard"><div class="lockic">${icon('lock')}</div><h3>No está incluido en tu plan</h3><p class="muted">${text}</p>
+    <div class="row" style="justify-content:center"><button class="btn" id="upg">${icon('star')} Pasar a ${esc(PLAN_NAMES[need].replace('Fase I · ', ''))}</button></div></div>`);
+  $('#upg').onclick = async () => { try { await OPO.checkout(need); } catch (e) { toast(e.message); } };
 };
 
 async function loadInvites() {
   const box = $('#invCard'); if (!box) return;
   let list = []; try { list = (await api('invites')).invites; } catch (e) { return; }
-  const st = i => i.usedBy ? `<span class="pill ok">usada por @${esc(i.usedBy)}</span>` : i.revoked ? '<span class="pill ko">anulada</span>' : '<span class="pill cyan">libre</span>';
-  box.innerHTML = `<div class="card"><div class="row"><div style="flex:1"><h3>Claves de invitación</h3><div class="small muted">Eres la cuenta administradora. Cada clave sirve para crear una sola cuenta.</div></div><button class="btn sm" id="invNew">${icon('user')} Crear clave</button></div>
-    ${list.length ? `<div class="tblwrap" style="margin-top:10px"><table class="tbl"><tr><th>Clave</th><th>Estado</th><th></th></tr>${list.map(i => `<tr><td class="mono">${esc(i.code)}</td><td>${st(i)}</td><td style="text-align:right">${!i.usedBy && !i.revoked ? `<button class="btn ghost sm" data-copy="${esc(i.code)}">Copiar</button><button class="btn ghost sm" data-rev="${esc(i.code)}">Anular</button>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="small muted">Aún no has creado ninguna.</p>'}</div>`;
-  $('#invNew').onclick = async () => { try { const r = await api('invites/create', { method: 'POST', body: {} }); try { await navigator.clipboard.writeText(r.code); toast('Clave creada y copiada: ' + r.code); } catch (e) { toast('Clave creada: ' + r.code); } loadInvites(); } catch (e) { toast(e.message); } };
-  $$('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copiada'); } catch (e) { toast(b.dataset.copy); } });
-  $$('[data-rev]').forEach(b => b.onclick = async () => { if (!confirm('¿Anular esta clave?')) return; await api('invites/revoke', { method: 'POST', body: { code: b.dataset.rev } }).catch(() => {}); loadInvites(); });
-}
-
-/* ---------- Acceso ---------- */
-function authView(mode = 'login') {
-  applyTheme(false);
-  $('#root').innerHTML = `<div class="auth">
-    <section class="hero">
-      <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC</span></div>
-      <h1>Tu torre de control<br>para la <em>oposición ENAIRE</em>.</h1>
-      <p>Cuestionarios, exámenes oficiales, tus resúmenes y un plan diario que se reprograma solo. En el móvil y en el PC.</p>
-      <div class="feats">
-        <div>${icon('check')} 759 preguntas de cuestionario y 563 de exámenes oficiales</div>
-        <div>${icon('check')} Repaso automático a 1, 3 y 7 días</div>
-        <div>${icon('check')} Simulacros con el formato real: 50 preguntas, −0,33</div>
-      </div>
-      <div class="radar"><div class="scope"></div><div class="sweep"></div>
-        <span class="blip" data-l="IBE3201 FL340" style="left:62%;top:28%"></span><span class="blip" data-l="VLG12K FL280" style="left:30%;top:60%;animation-delay:1.6s"></span><span class="blip" data-l="RYR8AB FL360" style="left:70%;top:68%;animation-delay:3s"></span></div>
-    </section>
-    <section class="panel"><form id="af" class="card" autocomplete="on">
-      <div class="seg" style="width:100%;margin-bottom:6px"><button type="button" data-mode="login" class="${mode === 'login' ? 'on' : ''}" style="flex:1">Entrar</button><button type="button" data-mode="register" class="${mode === 'register' ? 'on' : ''}" style="flex:1">Crear cuenta</button></div>
-      ${mode === 'register' ? `<label>Tu nombre</label><input id="an" autocomplete="name" placeholder="Cómo te llamamos">` : ''}
-      <label>Usuario</label><input id="au" autocomplete="username" autocapitalize="none" placeholder="tu_usuario" required>
-      <label>Contraseña</label><input id="ap" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="${mode === 'register' ? 'mínimo 8 caracteres' : ''}" required>
-      ${mode === 'register' ? `<label>Clave de invitación</label><input id="ai" autocapitalize="characters" placeholder="ATC-XXXX-XXXX"><div class="small muted" style="margin-top:6px">Cada clave sirve para crear una sola cuenta. Pídesela a quien administra la app.</div>` : ''}
-      <button class="btn block" style="margin-top:18px" id="ab">${mode === 'register' ? 'Crear cuenta' : 'Entrar'}</button>
-      <div class="err" id="ae"></div>
-      <div style="text-align:center;margin-top:6px"><a href="#" id="local" class="small muted">Probar sin cuenta (solo este dispositivo)</a></div>
-    </form></section></div>`;
-  $$('[data-mode]').forEach(b => b.onclick = () => authView(b.dataset.mode));
-  $('#local').onclick = e => { e.preventDefault(); SESS = { local: true, name: 'Invitado' }; localStorage.setItem(SESS_KEY, JSON.stringify(SESS)); boot(); };
-  $('#af').onsubmit = async e => {
-    e.preventDefault(); const btn = $('#ab'); btn.disabled = true; $('#ae').textContent = '';
-    try {
-      const body = { user: $('#au').value, pass: $('#ap').value }; if (mode === 'register') { body.name = $('#an').value; body.invite = $('#ai').value; }
-      const r = await api(mode, { method: 'POST', body });
-      SESS = { token: r.token, user: r.user, name: r.name }; localStorage.setItem(SESS_KEY, JSON.stringify(SESS)); boot();
-    } catch (er) { $('#ae').textContent = er.status ? er.message : 'No hay conexión con el servidor. ¿Está desplegada la app en Netlify?'; btn.disabled = false; }
-  };
+  const st = i => i.usedBy ? `<span class="pill ok">usado por ${esc(i.usedBy)}</span>` : i.revoked ? '<span class="pill ko">anulado</span>' : '<span class="pill cyan">libre</span>';
+  box.innerHTML = `<div class="card"><div class="row"><div style="flex:1"><h3>Códigos de acceso gratuito</h3><div class="small muted">Eres administrador. Cada código da acceso completo a una sola cuenta, sin pagar.</div></div><button class="btn sm" id="invNew">${icon('user')} Crear código</button></div>
+    ${list.length ? `<div class="tblwrap" style="margin-top:10px"><table class="tbl"><tr><th>Código</th><th>Estado</th><th></th></tr>${list.map(i => `<tr><td class="mono">${esc(i.code)}</td><td>${st(i)}</td><td style="text-align:right">${!i.usedBy && !i.revoked ? `<button class="btn ghost sm" data-copy="${esc(i.code)}">Copiar</button><button class="btn ghost sm" data-rev="${esc(i.code)}">Anular</button>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="small muted">Aún no has creado ninguno.</p>'}</div>`;
+  $('#invNew').onclick = async () => { try { const r = await api('invites/create', { method: 'POST', body: {} }); try { await navigator.clipboard.writeText(r.code); toast('Código creado y copiado: ' + r.code); } catch (e) { toast('Código creado: ' + r.code); } loadInvites(); } catch (e) { toast(e.message); } };
+  $$('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copiado'); } catch (e) { toast(b.dataset.copy); } });
+  $$('[data-rev]').forEach(b => b.onclick = async () => { if (!confirm('¿Anular este código?')) return; await api('invites/revoke', { method: 'POST', body: { code: b.dataset.rev } }).catch(() => {}); loadInvites(); });
 }
 
 /* ---------- Arranque ---------- */
-function boot(mode) {
+function boot() {
   QZ = null; EXZ = null; clearInterval(timerH);
-  if (!SESS) return authView(mode);
-  loadState(); shell(); render(); sync();
+  if (!SESS) { location.reload(); return; }
+  loadState(); shell();
+  if (!S.plan?.cfg && !location.hash.startsWith('#/bienvenida')) location.hash = '#/bienvenida';
+  render(); sync();
 }
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
 })();

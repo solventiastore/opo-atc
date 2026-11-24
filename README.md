@@ -1,29 +1,42 @@
-# Opo ATC · ENAIRE
+# OpoATC
 
-App personal para preparar la oposición de controlador aéreo de ENAIRE: cuentas de usuario, progreso sincronizado entre móvil y PC, y funcionamiento sin conexión.
+App de preparación para la **Fase I** de la oposición a controlador de tránsito aéreo, con web de venta, cuentas, suscripciones y plan de estudio personalizado.
 
-## Publicarla en Netlify
+- `public/index.html` — web de venta (embudo: precios → registro → plan → pago).
+- `public/app.html` — la app (pantallas de acceso en `auth.js`, la app en `app.js`).
+- `public/legal.html` — términos, privacidad y cookies (**rellena los campos marcados**).
+- `content/` — contenido de pago. **No se publica**: solo lo sirve la función a cuentas con plan.
+- `netlify/functions/api.mjs` — API: cuentas, email, Google, Stripe, contenido y sincronización (Netlify Blobs).
 
-Las cuentas y la sincronización usan una función de Netlify y Netlify Blobs. **Las funciones no se activan si subes la carpeta arrastrándola**, así que usa una de estas dos opciones:
+## Variables de entorno (Netlify → Site configuration → Environment variables)
 
-**A · Con GitHub (recomendado):** sube esta carpeta a un repositorio privado. Después, en Netlify, ve a «Add new site» → «Import an existing project», elige el repositorio y pulsa Deploy. La configuración ya viene en `netlify.toml`.
+| Variable | Para qué | Dónde se consigue |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | Cobros | Stripe → Developers → API keys (`sk_live_…`; prueba primero con `sk_test_…`) |
+| `STRIPE_WEBHOOK_SECRET` | Confirmar pagos, renovaciones y cancelaciones | Stripe → Developers → Webhooks → Add endpoint |
+| `RESEND_API_KEY` | Email de confirmación de cuenta | resend.com → API Keys |
+| `EMAIL_FROM` | Remitente, p. ej. `OpoATC <hola@tudominio.com>` | Dominio verificado en Resend |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | «Continuar con Google» | Google Cloud Console → Credenciales → ID de cliente OAuth (aplicación web) |
+| `ADMIN_USERS` | Emails con acceso total, separados por comas | — |
+| `SITE_URL` (opcional) | URL pública, p. ej. `https://opoatc.netlify.app` | — |
 
-**B · Con la línea de comandos** (necesitas Node instalado):
-```bash
-npm install
-npx netlify-cli login
-npx netlify-cli deploy --prod
-```
+**Nunca** pongas `TEST_MODE` en producción (simula pagos y emails).
 
-### Cuentas y claves de invitación
-- La **primera cuenta** que se cree en la web es la **administradora** y no necesita clave.
-- Para crear cualquier otra cuenta hace falta una **clave de invitación de un solo uso** (formato `ATC-XXXX-XXXX`). La administradora las crea, copia y anula desde **Ajustes → Claves de invitación**.
-- Opcional: en Netlify puedes fijar la variable `ADMIN_USERS` (usuarios separados por comas) para elegir quién es administrador.
+### Stripe
+1. Webhook: URL `https://TU-DOMINIO/api/billing/webhook`, eventos `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`.
+2. Activa el portal de cliente (Settings → Billing → Customer portal) con «Cancelar suscripción» permitido.
+3. No hace falta crear productos: los precios (8, 15 y 19 €/mes) están en `api.mjs`.
 
-## Datos que incluye
-- 759 preguntas de los cuestionarios (temas 1, 2, 3, 4, 5, 6, 8 y 9).
-- 563 preguntas de 11 exámenes oficiales (2017, 2023 y 2024-25), con la respuesta marcada en verde en el PDF.
-- Inglés de examenglish.com: 50 de grammar C2, 50 de vocabulary C2 y 422 palabras C2.
-- Resúmenes de los 9 temas, que se leen dentro de la app. Los apuntes a mano están transcritos y se puede ver la foto original de cada página.
-- La sección Memorizar y las 85 preguntas falladas del documento.
-- El plan diario, sacado del Excel de seguimiento.
+### Google
+- Orígenes autorizados: `https://TU-DOMINIO`
+- URI de redirección: `https://TU-DOMINIO/api/auth/google/callback`
+
+### Resend
+Verifica tu dominio (registros DNS) y usa una dirección de ese dominio en `EMAIL_FROM`. Sin Resend configurado, las cuentas nuevas no pueden confirmar el email.
+
+## Acceso
+- La primera cuenta creada es administradora (acceso total y códigos de acceso gratuito en Ajustes).
+- Las cuentas creadas antes de esta versión conservan el acceso completo.
+
+## Contenido
+Las preguntas salen siempre de los documentos originales (cuestionarios, exámenes de convocatorias anteriores e inglés). Los psicotécnicos se generan al momento (ejercicios propios).

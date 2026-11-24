@@ -1,12 +1,44 @@
 [build]
-  publish = "."
+  publish = "public"
   command = "npm install"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # el contenido de pago NO se publica: solo lo lee la función y lo sirve a cuentas con plan
+  included_files = ["content/**"]
+
+[[redirects]]
+  from = "/app"
+  to = "/app.html"
+  status = 200
+
+[[redirects]]
+  from = "/entrar"
+  to = "/app.html#/entrar"
+  status = 302
 
 [[headers]]
-  for = "/*"
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/app.html"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=2592000"
