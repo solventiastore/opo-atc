@@ -95,13 +95,13 @@ const defaultSettings = () => ({
   penalty: 0.33, simMinutes: 50, examDate: '', planStart: '', planLen: 31,
   pages: { meteo: 20, ffhh: 20, carto: 14, nav: 18, aero: 8, fpl: 12, inst: 19, entorno: 3 }
 });
-const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, settings: defaultSettings() });
+const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, settings: defaultSettings() });
 let S = defaultState();
 function loadState() {
   let s = null; try { s = JSON.parse(localStorage.getItem(stateKey()) || 'null'); } catch (e) {}
   S = Object.assign(defaultState(), s || {});
   S.settings = Object.assign(defaultSettings(), S.settings || {});
-  ['pd', 'rd', 'ov', 'q'].forEach(k => S[k] = S[k] || {});
+  ['pd', 'rd', 'ov', 'q', 'ps'].forEach(k => S[k] = S[k] || {});
   // migración desde la versión anterior (un solo dispositivo)
   if (!S.migrated) {
     for (const k of ['enaire_v1', 'opo_state_local']) {
@@ -121,7 +121,8 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 function mergeState(a, b) {
   if (!b) return a;
-  for (const k of ['q', 'ov', 'pd', 'rd']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
+  a.ps = a.ps || {};
+  for (const k of ['q', 'ov', 'pd', 'rd', 'ps']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
   for (const k of ['study', 'log', 'sims']) {
     const m = new Map((a[k] || []).map(x => [x.id, x]));
     for (const x of (b[k] || [])) { const y = m.get(x.id); if (!y) m.set(x.id, x); else if ((x.u || 0) > (y.u || 0)) m.set(x.id, x); else if (k === 'study' && x.ids) { y.ids = [...new Set([...y.ids, ...x.ids])]; } }
@@ -219,29 +220,64 @@ function markRead(t, a, b, label) {
   save(); return ids;
 }
 
-/* ---------- Plan diario (según tu seguimiento) ---------- */
+/* ---------- Plan adaptativo (a partir de tu Excel de seguimiento) ----------
+   El Excel se convierte en una lista ordenada de «bloques» (cada día del Excel con tareas = 1 bloque).
+   Cada día, al abrir la app, se fija qué bloques tocan hoy. Lo pendiente se reparte solo entre los días
+   que quedan hasta el examen: si te atrasas, se comprime; si adelantas, se estira. */
 const P = {
+  groups: R.sched.days.filter(d => d.items.length).map((d, gi) => ({ gi, items: d.items.map((it, i) => Object.assign({ key: `${d.d}:${i}`, gi }, it)) })),
+  finalNote: R.sched.days.filter(d => d.note).map(d => d.note).join('\n'),
   len: () => Math.max(7, +S.settings.planLen || R.sched.len || 31),
-  start: () => S.settings.planStart || (S.settings.examDate ? addDays(S.settings.examDate, -P.len()) : ymd()),
-  dayIndex: (ds = ymd()) => diffDays(P.start(), ds),
-  items(k) {
-    const L0 = R.sched.len || 31, Ln = P.len(); const out = [];
-    for (const d of R.sched.days) {
-      if (Math.floor(d.d * Ln / L0) !== k) continue;
-      d.items.forEach((it, i) => out.push(Object.assign({ key: `${d.d}:${i}` }, it)));
-      if (d.note) out.push({ key: `${d.d}:note`, k: 'note', n: d.note });
-    }
+  firstDay() { const ds = Object.keys(S.ps || {}).sort(); return S.settings.planStart || ds[0] || ymd(); },
+  // último día de estudio: la víspera del examen (o inicio + duración si no hay fecha)
+  end() { return S.settings.examDate ? addDays(S.settings.examDate, -1) : addDays(P.firstDay(), P.len() - 1); },
+  done: key => !!S.pd[key]?.v,
+  doneOn: key => S.pd[key]?.v ? (S.pd[key].d || null) : null,
+  setDone(key, v) { S.pd[key] = { v: v ? 1 : 0, u: now(), d: v ? ymd() : null }; save(); },
+  pendingG: g => g.items.some(it => !P.done(it.key)),
+  // reparte una lista de bloques entre los días [from, to]
+  spread(list, from, to) {
+    const N = Math.max(1, diffDays(from, to) + 1), n = list.length, out = {};
+    list.forEach((g, i) => { const d = addDays(from, Math.floor(i * N / n)); (out[d] = out[d] || []).push(g.gi); });
     return out;
   },
-  done: key => !!S.pd[key]?.v,
-  setDone(key, v) { S.pd[key] = { v: v ? 1 : 0, u: now() }; save(); },
+  // fija los bloques de hoy la primera vez que se abre la app en el día
+  today() {
+    const t = ymd(); S.ps = S.ps || {};
+    if (!S.ps[t]) {
+      const pend = P.groups.filter(P.pendingG);
+      const first = P.spread(pend, t, P.end() < t ? t : P.end())[t] || [];
+      S.ps[t] = { g: first, u: now() }; save();
+    }
+    return S.ps[t].g;
+  },
+  // planificación completa: {fecha: [bloques]} desde hoy hasta el último día
+  schedule() {
+    const t = ymd(), todayG = P.today(), end = P.end() < t ? t : P.end();
+    const rest = P.groups.filter(g => P.pendingG(g) && !todayG.includes(g.gi));
+    const fut = end > t ? P.spread(rest, addDays(t, 1), end) : (rest.length ? { [t]: rest.map(g => g.gi) } : {});
+    const sch = { [t]: [...todayG, ...(end > t ? [] : (fut[t] || []))] };
+    for (const [d, gs] of Object.entries(fut)) if (d !== t) sch[d] = gs;
+    return sch;
+  },
+  adelantar() { // trae a hoy el siguiente bloque pendiente
+    const sch = P.schedule(), t = ymd(); const next = Object.keys(sch).filter(d => d > t).sort()[0];
+    if (!next) return 0; S.ps[t].g = [...S.ps[t].g, ...sch[next]]; S.ps[t].u = now(); save(); return sch[next].length;
+  },
+  itemsOf: gis => gis.flatMap(gi => P.groups[gi].items),
+  stats() {
+    const all = P.groups.flatMap(g => g.items); const done = all.filter(it => P.done(it.key)).length;
+    const t = ymd(); const daysLeft = Math.max(1, diffDays(t, P.end()) + 1);
+    return { total: all.length, done, left: all.length - done, daysLeft, perDay: (all.length - done) / daysLeft, blocksLeft: P.groups.filter(P.pendingG).length };
+  },
 };
+const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'q' ? `preg. ${it.a}–${it.b}` : (it.n || '30 min');
 
 /* ---------- Shell / navegación ---------- */
 const NAV = [
-  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario subrayado']] },
+  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario subrayado'], ['cambios', 'alert', 'Cambios 2026']] },
   { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['ingles', 'globe', 'Inglés']] },
-  { g: 'Seguimiento', items: [['planning', 'cal', 'Planning'], ['stats', 'chart', 'Estadísticas'], ['ajustes', 'gear', 'Ajustes']] },
+  { g: 'Seguimiento', items: [['plan', 'grid', 'Mi plan'], ['planning', 'cal', 'Planning'], ['stats', 'chart', 'Estadísticas'], ['ajustes', 'gear', 'Ajustes']] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); TITLES.practicar = 'Practicar'; TITLES.mas = 'Más';
 const THEME_KEY = 'opo_theme';
@@ -280,7 +316,7 @@ function shell() {
 }
 function updateChrome(r) {
   $$('.side nav a').forEach(a => a.classList.toggle('on', a.dataset.r === r));
-  const tabMap = { '': '', hoy: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', ingles: 'practicar', practicar: 'practicar' };
+  const tabMap = { '': '', hoy: 'hoy', plan: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', ingles: 'practicar', practicar: 'practicar' };
   const tr = r in tabMap ? tabMap[r] : 'mas';
   $$('.tabbar a').forEach(a => a.classList.toggle('on', a.dataset.t === tr));
   $('#ttl').textContent = TITLES[r] ?? '';
@@ -418,7 +454,7 @@ routes[''] = () => {
   const dr = dueReviews(), pf = pendingFails();
   const days = S.settings.examDate ? Math.ceil((new Date(S.settings.examDate + 'T09:00:00') - now()) / DAY) : null;
   const todayN = Object.values(S.q).filter(r => r.t && ymd(r.t) === ymd()).length;
-  const st = streak(); const k = P.dayIndex(); const items = (k >= 0 && k < P.len()) ? P.items(k).filter(i => i.k !== 'note') : [];
+  const st = streak(); const items = P.itemsOf(P.today()).concat(P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === ymd() && !P.today().includes(it.gi))); const pst = P.stats();
   const doneN = items.filter(i => P.done(i.key)).length;
   const h = new Date().getHours(); const hi = h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches';
   const prio = TOPICS.filter(t => t.id !== 'entorno');
@@ -431,47 +467,35 @@ routes[''] = () => {
   </div>
   <a class="card hl" href="#/hoy" style="display:flex;gap:16px;align-items:center;color:inherit">
     ${ring(pct(doneN, items.length || 1), 70, 8, items.length ? `${doneN}/${items.length}` : '—')}
-    <div style="flex:1"><div class="eyebrow" style="margin:0">Hoy toca · ${k >= 0 && k < P.len() ? `día ${k + 1} de ${P.len()}` : k < 0 ? 'tu plan aún no ha empezado' : 'plan completado'}</div>
+    <div style="flex:1"><div class="eyebrow" style="margin:0">Hoy toca · plan al ${pct(pst.done, pst.total)}% · quedan ${pst.left} tareas</div>
     <div style="font-weight:650;margin-top:4px">${items.length ? items.filter(i => i.k !== 'psico').slice(0, 4).map(i => `${TOP[i.t]?.short || tname(i.t)} ${i.k === 'res' ? 'págs. ' + i.a + '–' + i.b : 'preg. ' + i.a + '–' + i.b}`).join(' · ') : 'Día de repaso: falladas y repasos 1·3·7'}</div></div>${icon('chevR', 'chev')}</a>
   <div class="row" style="margin:14px 0 6px"><a class="btn" href="#/aleatorio">${icon('shuffle')} A boleo</a><a class="btn sec" href="#/cuestionarios">${icon('layers')} Cuestionarios</a><a class="btn sec" href="#/examenes">${icon('exam')} Simulacro</a></div>
+  ${R.cambios ? `<a class="card flat row" href="#/cambios" style="color:inherit"><div class="ico" style="width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--glass2)">${icon('alert')}</div><div style="flex:1"><b>Temario 2026 publicado</b><div class="small muted">Casi todo son erratas; cambian sobre todo las fichas de aeronaves (tema 2) y la flecha del ala (tema 9).</div></div>${icon('chevR', 'chev')}</a>` : ''}
   <h2>Tu progreso por tema</h2>
   <div class="topics">${prio.map(t => { const s = topicStats(t.id); return `<a class="topic" href="#/cuestionarios/${t.id}" style="--tc:${t.c}33"><div class="n">TEMA ${t.n}</div><div class="nm">${t.name}${t.w >= 3 ? '<span class="pill cyan">prioritario</span>' : ''}</div>
     <div class="bar"><i style="width:${pct(s.seen, s.scope)}%;background:${t.c}"></i></div><div class="row small muted"><span>${pct(s.seen, s.scope)}% hecho</span><span class="spacer"></span><span>${pct(s.ok, s.seen)}% acierto</span></div></a>`; }).join('')}</div>
   ${SESS.local ? `<div class="warnbox">${icon('alert')}<div>Estás usando la app sin cuenta: el progreso solo se guarda en este dispositivo. <a href="#/ajustes">Crea una cuenta</a> para tenerlo en el móvil y en el PC.</div></div>` : ''}`);
 };
 
-/* ---------- Hoy toca ---------- */
-routes['hoy'] = (args, q) => {
-  const today = P.dayIndex(); const k = q.d != null ? +q.d : today; const Ln = P.len();
-  const date = addDays(P.start(), k);
-  const items = (k >= 0 && k < Ln) ? P.items(k) : [];
-  const real = items.filter(i => i.k !== 'note'); const doneN = real.filter(i => P.done(i.key)).length;
-  const mins = real.reduce((a, i) => a + (i.k === 'res' ? (i.b - i.a + 1) * (R.sched.minPerPage || 30) : i.k === 'q' ? Math.ceil((i.b - i.a + 1) * 0.6) : 30), 0);
-  const card = it => {
-    const d = P.done(it.key); const t = TOP[it.t];
-    let title, desc, actions = '';
-    if (it.k === 'res') {
-      const has = pagesOf(it.t).length; const nq = qForPages(it.t, it.a, it.b).length;
-      title = `${tname(it.t)} · resumen págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}`;
-      desc = has ? `${(it.b - it.a + 1) * (R.sched.minPerPage || 30)} min aprox.${nq ? ` · ${nq} preguntas del cuestionario de estas páginas irán al repaso 1·3·7` : ''}${R.res[it.t].exact ? '' : ' · páginas aproximadas'}` : 'Aún no tengo tu resumen de este tema: pásamelo y aparecerá aquí.';
-      if (has) actions = `<a class="btn sm" href="#/resumenes/${it.t}/${it.a}?to=${it.b}&task=${encodeURIComponent(it.key)}">${icon('book')} Leer</a>`;
-    } else if (it.k === 'q') {
-      const n = D.q.filter(x => x.t === it.t && x.n >= it.a && x.n <= it.b).length;
-      title = `${tname(it.t)} · cuestionario preguntas ${it.a}–${it.b}`; desc = `${n} preguntas${it.n ? ' · ' + esc(it.n) : ''} · entran en tu repaso 1·3·7`;
-      actions = `<button class="btn sm" data-q="${it.key}">${icon('play')} Hacer</button>`;
-    } else if (it.k === 'psico') { title = 'Psicotécnicos'; desc = esc(it.n || '30 min'); }
-    else return `<div class="warnbox">${icon('alert')}<div style="white-space:pre-wrap">${esc(it.n)}</div></div>`;
-    return `<div class="task ${d ? 'done' : ''}" style="border-left:3px solid ${t?.c || '#94a3b8'}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>
-      <div class="body"><div class="tt">${title}</div><div class="small muted" style="margin:3px 0 8px">${desc}</div><div class="row">${actions}</div></div></div>`;
-  };
-  app(`${head(`Día ${k + 1} de ${Ln} · ${fmtDate(date, { weekday: 'long', day: 'numeric', month: 'long' })}`, 'Hoy toca', 'Tu plan sale de tu Excel de seguimiento del año pasado: qué páginas de resumen y qué preguntas del cuestionario tocan cada día.',
-    `<div class="daynav"><button data-d="${k - 1}" aria-label="Día anterior">${icon('chevL')}</button>${k !== today ? `<button data-d="${today}" style="width:auto;padding:0 12px;font-weight:600;font-size:13px">Hoy</button>` : ''}<button data-d="${k + 1}" aria-label="Día siguiente">${icon('chevR')}</button></div>`)}
-  ${k < 0 ? `<div class="card empty">${icon('cal')}<div>Tu plan empieza el <b>${fmtDate(P.start(), { day: 'numeric', month: 'long' })}</b>.</div><div class="small" style="margin-top:6px">Puedes cambiar el inicio o la duración en <a href="#/planning">Planning</a>.</div></div>` : ''}
-  ${k >= Ln ? `<div class="card empty">${icon('check')}<div>Plan completado. Toca repasar: falladas, repasos y simulacros.</div></div>` : ''}
-  ${k >= 0 && k < Ln ? `<div class="card flat row" style="gap:16px">${ring(pct(doneN, real.length || 1), 64, 7, real.length ? doneN + '/' + real.length : '—')}<div><div style="font-weight:650">${real.length ? `${real.length} tareas · ~${Math.round(mins / 60 * 10) / 10} h` : 'Día libre o de repaso'}</div><div class="small muted">Plan de ${Ln} días desde el ${fmtDate(P.start())}${S.settings.examDate ? ' · examen el ' + fmtDate(S.settings.examDate) : ''}</div></div></div>
-    ${items.map(card).join('') || `<div class="card empty">${icon('repeat')}<div>No hay temario nuevo hoy. Aprovecha para tus repasos 1·3·7 y las falladas.</div><div class="row" style="justify-content:center;margin-top:12px"><a class="btn sm" href="#/repaso">Repasos</a><a class="btn sm sec" href="#/falladas">Falladas</a></div></div>`}` : ''}
-  <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/planning">${icon('cal')} Ajustar plan</a></div>`);
-  $$('[data-d]').forEach(b => b.onclick = () => { location.hash = '#/hoy?d=' + b.dataset.d; });
+/* ---------- Hoy toca (plan adaptativo) ---------- */
+function taskCard(it, day) {
+  const d = P.done(it.key), on = P.doneOn(it.key); const t = TOP[it.t]; const isPast = day < ymd();
+  let title, desc, actions = '';
+  if (it.k === 'res') {
+    const has = pagesOf(it.t).length; const nq = qForPages(it.t, it.a, it.b).length;
+    title = `${tname(it.t)} · resumen págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}`;
+    desc = has ? `${(it.b - it.a + 1) * (R.sched.minPerPage || 30)} min aprox.${nq ? ` · ${nq} preguntas de estas páginas irán al repaso 1·3·7` : ''}${R.res[it.t].exact ? '' : ' · páginas aproximadas'}` : 'Aún no tengo tu resumen de este tema.';
+    if (has) actions = `<a class="btn sm" href="#/resumenes/${it.t}/${it.a}?to=${it.b}&task=${encodeURIComponent(it.key)}">${icon('book')} Leer</a>`;
+  } else if (it.k === 'q') {
+    const n = D.q.filter(x => x.t === it.t && x.n >= it.a && x.n <= it.b).length;
+    title = `${tname(it.t)} · cuestionario preguntas ${it.a}–${it.b}`; desc = `${n} preguntas${it.n ? ' · ' + esc(it.n) : ''} · entran en tu repaso 1·3·7`;
+    actions = `<button class="btn sm" data-q="${it.key}">${icon('play')} Hacer</button>`;
+  } else { title = 'Psicotécnicos'; desc = esc(it.n || '30 min'); }
+  const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast ? '<span class="pill amber">pendiente → se ha recolocado</span>' : '');
+  return `<div class="task ${d ? 'done' : ''}" style="border-left:3px solid ${t?.c || '#94a3b8'}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>
+    <div class="body"><div class="tt">${title} ${badge}</div><div class="small muted" style="margin:3px 0 8px">${desc}</div><div class="row">${actions}</div></div></div>`;
+}
+function bindTasks(items, back) {
   $$('[data-tick]').forEach(b => b.onclick = () => {
     const key = b.dataset.tick, it = items.find(i => i.key === key), nv = !P.done(key);
     P.setDone(key, nv);
@@ -481,8 +505,65 @@ routes['hoy'] = (args, q) => {
   $$('[data-q]').forEach(b => b.onclick = () => {
     const it = items.find(i => i.key === b.dataset.q);
     const ids = D.q.filter(x => x.t === it.t && x.n >= it.a && x.n <= it.b).map(x => x.id);
-    startQuiz({ title: `${tname(it.t)} ${it.a}–${it.b}`, list: ids, studyTopic: it.t, back: '#/hoy' + (q.d != null ? '?d=' + q.d : ''), onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
+    startQuiz({ title: `${tname(it.t)} ${it.a}–${it.b}`, list: ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
   });
+}
+const taskMins = items => items.reduce((a, i) => a + (i.k === 'res' ? (i.b - i.a + 1) * (R.sched.minPerPage || 30) : i.k === 'q' ? Math.ceil((i.b - i.a + 1) * 0.6) : 30), 0);
+routes['hoy'] = (args, q) => {
+  const t = ymd(); const day = q.f || t; const sch = P.schedule(); const isToday = day === t, isPast = day < t;
+  const gis = isPast ? (S.ps[day]?.g || []) : (sch[day] || []);
+  let items = P.itemsOf(gis);
+  if (isPast || isToday) { const extra = P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === day && !gis.includes(it.gi)); items = items.concat(extra); }
+  const doneN = items.filter(i => P.done(i.key)).length; const mins = taskMins(items.filter(i => !P.done(i.key)));
+  const days = Object.keys(sch).sort(); const nextDay = days.find(d => d > t); const nextN = nextDay ? P.itemsOf(sch[nextDay]).length : 0;
+  const st = P.stats(); const back = '#/hoy' + (q.f ? '?f=' + q.f : '');
+  const nav = `<div class="daynav"><button data-f="${addDays(day, -1)}" aria-label="Día anterior">${icon('chevL')}</button>${!isToday ? `<button data-f="${t}" style="width:auto;padding:0 12px;font-weight:600;font-size:13px">Hoy</button>` : ''}<button data-f="${addDays(day, 1)}" aria-label="Día siguiente">${icon('chevR')}</button></div>`;
+  app(`${head(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' }) + (isToday ? ' · hoy' : ''), isToday ? 'Hoy toca' : isPast ? 'Lo que tocaba' : 'Lo que toca', isToday ? 'El plan sale de tu Excel y se recalcula solo: lo que no hagas pasa a los días siguientes, y lo que adelantes libera días.' : isPast ? 'Lo que no hiciste ese día ya está recolocado en los días siguientes.' : 'Puedes adelantar estas tareas: márcalas al hacerlas y el plan se recalcula.', nav)}
+  <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${items.length ? `${items.length} tareas${mins ? ` · ~${Math.round(mins / 60 * 10) / 10} h pendientes` : ' · ¡todo hecho!'}` : 'Día libre o de repaso'}</div>
+    <div class="small muted">Quedan ${st.left} tareas en ${st.daysLeft} días${S.settings.examDate ? ` · examen el ${fmtDate(S.settings.examDate)}` : ' · pon la fecha del examen en Planning'}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
+  ${items.map(it => taskCard(it, day)).join('') || `<div class="card empty">${icon('repeat')}<div>${isPast ? 'Ese día no había tareas.' : 'No hay temario nuevo este día. Aprovecha para repasos y falladas.'}</div></div>`}
+  ${day === P.end() && P.finalNote ? `<div class="warnbox">${icon('alert')}<div><b>Repaso final (de tu Excel):</b><div style="white-space:pre-wrap">${esc(P.finalNote)}</div></div></div>` : ''}
+  ${isToday && nextN ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo de mañana?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
+  <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/planning">${icon('cal')} Fecha del examen</a></div>`);
+  $$('[data-f]').forEach(b => b.onclick = () => { location.hash = '#/hoy?f=' + b.dataset.f; });
+  const ad = $('#adel'); if (ad) ad.onclick = () => { const n = P.adelantar(); toast(n ? 'Añadido a hoy. El plan se ha recolocado.' : 'No hay más tareas'); render(); };
+  bindTasks(items, back);
+};
+
+/* ---------- Mi plan (vista tipo Excel) ---------- */
+const PLAN_COLS = [['res', 'meteo', 'Meteo'], ['res', 'ffhh', 'FFHH'], ['res', 'carto', 'Carto'], ['res', 'nav', 'Nav'], ['res', 'aero', 'Aero'], ['res', 'fpl', 'Plan vuelo'], ['res', 'inst', 'Instit.'], ['psico', 'psico', 'Psicos'],
+  ['q', 'inst', 'Instit.'], ['q', 'oaci', 'Códigos'], ['q', 'meteo', 'Meteo'], ['q', 'carto', 'Carto'], ['q', 'nav', 'Nav'], ['q', 'fpl', 'Plan vuelo'], ['q', 'ffhh', 'FFHH'], ['q', 'aero', 'Aero']];
+routes['plan'] = () => {
+  const t = ymd(); const sch = P.schedule(); const st = P.stats();
+  const from = [P.firstDay(), ...Object.keys(S.ps || {})].sort()[0]; const end = P.end() < t ? t : P.end();
+  const dates = []; for (let d = from; d <= end; d = addDays(d, 1)) dates.push(d);
+  const itemsFor = d => {
+    const gis = d < t ? (S.ps[d]?.g || []) : (sch[d] || []); let its = P.itemsOf(gis);
+    if (d <= t) its = its.concat(P.groups.flatMap(g => g.items).filter(it => P.doneOn(it.key) === d && !gis.includes(it.gi)));
+    return its;
+  };
+  const cls = (it, d) => P.done(it.key) ? 'c-done' : d < t ? 'c-miss' : d === t ? 'c-today' : 'c-fut';
+  const strip = dates.map(d => { const its = itemsFor(d); const dn = its.filter(i => P.done(i.key)).length; const pc = its.length ? dn / its.length : 0;
+    const c = !its.length ? 'none' : d < t ? (pc === 1 ? 'full' : pc > 0 ? 'part' : 'miss') : d === t ? 'today' : 'fut';
+    return `<a class="hs ${c}" href="#/hoy?f=${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></a>`; }).join('');
+  const rows = dates.map(d => { const its = itemsFor(d); if (!its.length && d < t) return '';
+    const cells = PLAN_COLS.map(([k, tp]) => { const c = its.filter(i => i.k === k && i.t === tp); return `<td>${c.map(i => `<span class="pc ${cls(i, d)}">${esc(itemLabel(i))}</span>`).join('')}</td>`; }).join('');
+    return `<tr class="${d === t ? 'trow' : ''}"><th><a href="#/hoy?f=${d}">${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</a></th>${cells}</tr>`; }).join('');
+  app(`${head('Seguimiento', 'Mi plan', 'Tu Excel de seguimiento convertido en plan vivo. Lo que no haces se recoloca en los días siguientes y lo que adelantas libera días. Toca un día para ver sus tareas.')}
+  <div class="grid g4" style="margin-top:14px">
+    <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
+    <div class="kpi"><div class="tiny">Quedan</div><div class="v">${st.left}</div><div class="s">tareas (${st.blocksLeft} días del Excel)</div></div>
+    <div class="kpi"><div class="tiny">Días hasta el final</div><div class="v">${st.daysLeft}</div><div class="s">${S.settings.examDate ? 'examen el ' + fmtDate(S.settings.examDate) : 'sin fecha de examen'}</div></div>
+    <div class="kpi"><div class="tiny">Ritmo necesario</div><div class="v">${st.perDay.toFixed(1)}</div><div class="s">tareas al día ${st.blocksLeft > st.daysLeft ? '<b class="c-ko">· vas justo</b>' : '<b class="c-ok">· vas bien</b>'}</div></div></div>
+  <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
+  <h2>Calendario</h2>
+  <div class="card"><div class="hstrip">${strip}</div>
+    <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span></div></div>
+  <h2>Día a día (como tu Excel)</h2>
+  <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="7" class="grp">Resúmenes (páginas)</th><th rowspan="2">Psicos</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th></tr>
+    <tr>${PLAN_COLS.filter(c => c[0] !== 'psico').map(c => `<th>${c[2]}</th>`).join('')}</tr></thead>
+    <tbody>${rows}${S.settings.examDate ? `<tr class="erow"><th>${fmtDate(S.settings.examDate, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="16">EXAMEN ✈</td></tr>` : ''}</tbody></table></div>
+  <div class="small muted" style="margin-top:8px"><span class="pc c-done">verde</span> hecho · <span class="pc c-today">azul</span> hoy · <span class="pc c-fut">gris</span> pendiente · <span class="pc c-miss">ámbar</span> no hecho ese día (ya recolocado)</div>`);
 };
 
 /* ---------- Resúmenes ---------- */
@@ -575,6 +656,10 @@ routes['temario'] = (args) => {
   if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.hlblock').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.style.borderLeftColor = 'var(--cyan)'; } }, 60);
 };
 
+/* ---------- Cambios del temario 2026 ---------- */
+routes['cambios'] = () => app(`${head('Estudiar', 'Cambios en el temario 2026', 'Publicados el 23 de noviembre de 2026. Ya están marcados con 🆕 en tus resúmenes y en las preguntas afectadas.')}
+  <div class="card"><div class="prose">${R.cambios || ''}</div></div>`);
+
 /* ---------- Hubs móviles ---------- */
 const hub = (title, items) => app(`${head('', title)}<div class="card list">${items.map(([r, ic, t, d]) => `<a href="#/${r}"><div class="ico">${icon(ic)}</div><div style="flex:1"><div class="t">${t}</div><div class="d">${d}</div></div>${icon('chevR', 'chev')}</a>`).join('')}</div>`);
 routes['practicar'] = () => hub('Practicar', [
@@ -589,7 +674,9 @@ routes['mas'] = () => {
     ['resumenes', 'book', 'Resúmenes', 'Tus apuntes dentro de la app'],
     ['memorizar', 'brain', 'Memorizar', 'Datos clave en modo huecos y tarjetas'],
     ['temario', 'marker', 'Temario subrayado', 'Lo que entra, por página'],
-    ['planning', 'cal', 'Planning', 'Fecha de examen, plan y lo estudiado'],
+    ['plan', 'grid', 'Mi plan', 'Calendario de tu plan: hecho y pendiente'],
+    ['cambios', 'alert', 'Cambios temario 2026', 'Lo que cambia en los temas nuevos'],
+    ['planning', 'cal', 'Planning', 'Fecha de examen y lo estudiado'],
     ['stats', 'chart', 'Estadísticas', 'Tu progreso y qué cae en el examen'],
     ['ajustes', 'gear', 'Ajustes y cuenta', 'Prioridades, examen y sesión'],
   ]);
@@ -773,13 +860,12 @@ routes['planning'] = () => {
     const s = topicStats(t.id); return { t, total, done: Math.min(pr.size, total || pr.size), s, perDay: days && total ? Math.max(0, (total - pr.size) / days) : null };
   });
   const logs = S.log.slice().sort((a, b) => b.d.localeCompare(a.d));
-  app(`${head('Seguimiento', 'Planning', 'La fecha del examen y la duración del plan deciden qué te toca cada día en «Hoy toca».')}
+  app(`${head('Seguimiento', 'Planning', 'Con la fecha del examen, tu plan reparte lo que te queda entre los días disponibles, y se recoloca solo cada día.')}
   <div class="card"><div class="grid">
     <div><label>Fecha del examen</label><input type="date" id="exd" value="${st.examDate || ''}"></div>
-    <div><label>Duración del plan (días)</label><input type="number" id="plen" min="7" max="200" value="${P.len()}"></div>
-    <div><label>Empieza el</label><input type="date" id="pst" value="${P.start()}"></div>
-    <div><label>Cuenta atrás</label><div class="mono" style="font-size:26px;font-weight:800;padding-top:4px">${days ? days + ' días' : '—'}</div></div></div>
-    <p class="small muted" style="margin-top:10px">Tu Excel del año pasado tenía 31 días. Si eliges más días, el plan se estira y quedan días libres para repasar. Si no pones fecha de inicio, el plan termina el día antes del examen.</p></div>
+    <div><label>Cuenta atrás</label><div class="mono" id="cdown" style="font-size:26px;font-weight:800;padding-top:4px">${days ? days + ' días' : '—'}</div></div>
+    ${st.examDate ? '' : `<div><label>Sin fecha: duración del plan (días)</label><input type="number" id="plen" min="7" max="200" value="${P.len()}"></div>`}</div>
+    <div class="row" style="margin-top:12px"><a class="btn sec sm" href="#/plan">${icon('grid')} Ver mi plan</a><span class="small muted">El temario termina la víspera del examen. Lo que no hagas un día se recoloca solo.</span></div></div>
   <h2>Avance del temario</h2>
   <div class="card tblwrap"><table class="tbl"><tr><th>Tema</th><th>Págs. resumen</th><th>Estudiadas</th><th>Ritmo</th><th>Cuestionario</th></tr>
   ${rows.map(r => `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${r.t.c};margin-right:8px"></span>${r.t.short}</td><td><input type="number" min="0" style="width:72px;padding:6px 8px" data-pg="${r.t.id}" value="${r.total}"></td><td class="mono">${r.done}/${r.total || '?'}</td><td class="mono small">${r.perDay != null ? (r.perDay ? r.perDay.toFixed(1) + '/día' : '✓') : '—'}</td><td class="mono">${pct(r.s.seen, r.s.scope)}%</td></tr>`).join('')}</table></div>
@@ -794,9 +880,12 @@ routes['planning'] = () => {
     <button class="btn" id="addLog">${icon('check')} Guardar</button></div>
   <h2>Historial</h2>
   ${logs.length ? `<div class="card tblwrap"><table class="tbl"><tr><th>Día</th><th>Tema</th><th>Págs</th><th>Preg.</th><th>Nota</th><th></th></tr>${logs.slice(0, 80).map(l => `<tr><td>${fmtDate(l.d)}</td><td>${esc(TOP[l.topic]?.short || tname(l.topic))}</td><td class="mono">${l.pf ? l.pf + '–' + (l.pt || l.pf) : ''}</td><td class="mono">${l.qf ? l.qf + '–' + l.qt : ''}</td><td class="small">${esc(l.note || '')}</td><td><a href="#" data-del="${l.id}" class="muted">✕</a></td></tr>`).join('')}</table></div>` : '<p class="muted">Nada apuntado todavía.</p>'}`);
-  $('#exd').onchange = e => { st.examDate = e.target.value; save(true); render(); };
-  $('#plen').onchange = e => { st.planLen = Math.max(7, Math.min(200, +e.target.value || 31)); save(true); render(); };
-  $('#pst').onchange = e => { st.planStart = e.target.value; save(true); render(); };
+  // Fecha: se guarda al terminar de escribirla (blur/Enter), no en cada tecla, para que no se repinte la página a mitad del año
+  const exd = $('#exd'); let exdDirty = false;
+  exd.oninput = exd.onchange = () => { exdDirty = true; const v = exd.value; if (/^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 2025) { st.examDate = v; save(true); $('#cdown').textContent = Math.max(1, Math.ceil((new Date(v + 'T09:00:00') - now()) / DAY)) + ' días'; } };
+  exd.onblur = () => { if (exdDirty) render(); };
+  exd.onkeydown = e => { if (e.key === 'Enter') exd.blur(); };
+  const pl = $('#plen'); if (pl) pl.onchange = e => { st.planLen = Math.max(7, Math.min(200, +e.target.value || 31)); save(true); render(); };
   $$('[data-pg]').forEach(i => i.onchange = () => { st.pages[i.dataset.pg] = +i.value; save(true); render(); });
   $('#addLog').onclick = () => {
     const l = { id: uid(), d: $('#ld').value || ymd(), topic: $('#lt').value, pf: +$('#pf').value || 0, pt: +$('#pt').value || +$('#pf').value || 0, qf: +$('#qf').value || 0, qt: +$('#qt').value || +$('#qf').value || 0, note: $('#ln').value, u: now() };
@@ -842,6 +931,7 @@ routes['ajustes'] = () => {
   <div class="card"><div class="row"><div class="avatar" style="width:46px;height:46px;font-size:17px">${esc(initials(SESS.name || SESS.user))}</div><div style="flex:1"><div style="font-weight:700">${esc(SESS.name || 'Invitado')}</div><div class="small muted">${SESS.local ? 'Sin cuenta · solo este dispositivo' : '@' + esc(SESS.user) + ' · sincronizado entre dispositivos'}</div></div>
   ${SESS.local ? `<button class="btn" id="toAcc">Crear cuenta / entrar</button>` : `<button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button>`}</div>
   ${SESS.local ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>
+  <div id="invCard"></div>
   <div class="card row"><div style="flex:1"><h3>Apariencia</h3><div class="small muted">Se guarda en este dispositivo</div></div><div class="seg"><button data-th="light" class="${theme() === 'light' ? 'on' : ''}">Claro</button><button data-th="dark" class="${theme() === 'dark' ? 'on' : ''}">Oscuro</button></div></div>
   <div class="card"><h3>Prioridad de cada tema</h3><p class="small muted">Cuánto sale cada tema en «A boleo» y en el simulacro «con mis prioridades». 0 = no sale.</p>
   ${TOPICS.map(t => `<div class="row" style="flex-wrap:nowrap;margin:6px 0"><span style="min-width:120px" class="small">${t.short}</span><input type="range" min="0" max="5" step="0.5" value="${st.weights[t.id] ?? 0}" data-w="${t.id}" style="flex:1"><b class="mono" id="wv-${t.id}" style="width:30px;text-align:right">${st.weights[t.id] ?? 0}</b></div>`).join('')}
@@ -849,6 +939,7 @@ routes['ajustes'] = () => {
   <div class="card"><h3>Examen</h3><div class="grid"><div><label>Penalización por fallo</label><select id="pen"><option value="0">Sin penalización</option><option value="0.25">−0,25</option><option value="0.33">−0,33 (oficial)</option><option value="0.5">−0,5</option></select></div><div><label>Minutos del simulacro</label><input type="number" id="mins" value="${st.simMinutes}"></div></div>
   <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="onlyHl" ${st.onlyHl ? 'checked' : ''}><i></i></span> Solo preguntas de lo subrayado en amarillo</label></div>
   <div class="card"><h3>Copia de seguridad</h3><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="exp">Exportar progreso</button><label class="btn ghost sm" style="margin:0">Importar<input type="file" id="imp" accept=".json" hidden></label><span class="spacer"></span><button class="btn danger sm" id="rst">Borrar progreso</button></div></div>`);
+  if (!SESS.local) api('me').then(me => { if (me?.admin) loadInvites(); }).catch(() => {});
   $$('[data-th]').forEach(b => b.onclick = () => { localStorage.setItem(THEME_KEY, b.dataset.th); applyTheme(true); render(); });
   $('#pen').value = String([0, 0.25, 0.33, 0.5].reduce((a, b) => Math.abs(b - st.penalty) < Math.abs(a - st.penalty) ? b : a));
   const ta = $('#toAcc'); if (ta) ta.onclick = () => { SESS = null; localStorage.removeItem(SESS_KEY); boot('register'); };
@@ -865,6 +956,17 @@ routes['ajustes'] = () => {
   $('#imp').onchange = async e => { const f = e.target.files[0]; if (!f) return; try { mergeState(S, JSON.parse(await f.text())); save(); toast('Importado'); render(); } catch (er) { toast('Archivo no válido'); } };
   $('#rst').onclick = () => { if (confirm('¿Borrar todo tu progreso? No se puede deshacer.') && confirm('¿Seguro del todo?')) { S = defaultState(); S.migrated = 1; S.settings.u = now(); localStorage.setItem(stateKey(), JSON.stringify(S)); api('sync', { method: 'PUT', body: JSON.stringify(S) }).catch(() => {}); render(); } };
 };
+
+async function loadInvites() {
+  const box = $('#invCard'); if (!box) return;
+  let list = []; try { list = (await api('invites')).invites; } catch (e) { return; }
+  const st = i => i.usedBy ? `<span class="pill ok">usada por @${esc(i.usedBy)}</span>` : i.revoked ? '<span class="pill ko">anulada</span>' : '<span class="pill cyan">libre</span>';
+  box.innerHTML = `<div class="card"><div class="row"><div style="flex:1"><h3>Claves de invitación</h3><div class="small muted">Eres la cuenta administradora. Cada clave sirve para crear una sola cuenta.</div></div><button class="btn sm" id="invNew">${icon('user')} Crear clave</button></div>
+    ${list.length ? `<div class="tblwrap" style="margin-top:10px"><table class="tbl"><tr><th>Clave</th><th>Estado</th><th></th></tr>${list.map(i => `<tr><td class="mono">${esc(i.code)}</td><td>${st(i)}</td><td style="text-align:right">${!i.usedBy && !i.revoked ? `<button class="btn ghost sm" data-copy="${esc(i.code)}">Copiar</button><button class="btn ghost sm" data-rev="${esc(i.code)}">Anular</button>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="small muted">Aún no has creado ninguna.</p>'}</div>`;
+  $('#invNew').onclick = async () => { try { const r = await api('invites/create', { method: 'POST', body: {} }); try { await navigator.clipboard.writeText(r.code); toast('Clave creada y copiada: ' + r.code); } catch (e) { toast('Clave creada: ' + r.code); } loadInvites(); } catch (e) { toast(e.message); } };
+  $$('[data-copy]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copiada'); } catch (e) { toast(b.dataset.copy); } });
+  $$('[data-rev]').forEach(b => b.onclick = async () => { if (!confirm('¿Anular esta clave?')) return; await api('invites/revoke', { method: 'POST', body: { code: b.dataset.rev } }).catch(() => {}); loadInvites(); });
+}
 
 /* ---------- Acceso ---------- */
 function authView(mode = 'login') {
@@ -887,7 +989,7 @@ function authView(mode = 'login') {
       ${mode === 'register' ? `<label>Tu nombre</label><input id="an" autocomplete="name" placeholder="Cómo te llamamos">` : ''}
       <label>Usuario</label><input id="au" autocomplete="username" autocapitalize="none" placeholder="tu_usuario" required>
       <label>Contraseña</label><input id="ap" type="password" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="${mode === 'register' ? 'mínimo 8 caracteres' : ''}" required>
-      ${mode === 'register' ? `<label>Código de invitación <span class="muted">(si te lo han dado)</span></label><input id="ai" autocapitalize="none">` : ''}
+      ${mode === 'register' ? `<label>Clave de invitación</label><input id="ai" autocapitalize="characters" placeholder="ATC-XXXX-XXXX"><div class="small muted" style="margin-top:6px">Cada clave sirve para crear una sola cuenta. Pídesela a quien administra la app.</div>` : ''}
       <button class="btn block" style="margin-top:18px" id="ab">${mode === 'register' ? 'Crear cuenta' : 'Entrar'}</button>
       <div class="err" id="ae"></div>
       <div style="text-align:center;margin-top:6px"><a href="#" id="local" class="small muted">Probar sin cuenta (solo este dispositivo)</a></div>

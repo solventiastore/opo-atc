@@ -15,8 +15,10 @@ npx netlify-cli login
 npx netlify-cli deploy --prod
 ```
 
-### Opcional: que solo tú puedas crear cuenta
-En Netlify, ve a «Site configuration» → «Environment variables» y añade `INVITE_CODE` con una palabra secreta. A partir de entonces, para registrarse habrá que escribir ese código.
+### Cuentas y claves de invitación
+- La **primera cuenta** que se cree en la web es la **administradora** y no necesita clave.
+- Para crear cualquier otra cuenta hace falta una **clave de invitación de un solo uso** (formato `ATC-XXXX-XXXX`). La administradora las crea, copia y anula desde **Ajustes → Claves de invitación**.
+- Opcional: en Netlify puedes fijar la variable `ADMIN_USERS` (usuarios separados por comas) para elegir quién es administrador.
 
 ## Datos que incluye
 - 759 preguntas de los cuestionarios (temas 1, 2, 3, 4, 5, 6, 8 y 9).

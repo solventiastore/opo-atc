@@ -323,3 +323,36 @@ body.light .bar{background:rgba(15,23,42,.08)}
 .rule.open{background:rgba(167,139,250,.13);border-color:rgba(167,139,250,.45)}
 body.light .rule{background:#f5f3ff;border-color:#ddd6fe;color:#3b0764}
 body.light .rule.open{background:#ede9fe;border-color:#c4b5fd}
+
+/* Mi plan: calendario y tabla tipo Excel */
+.hstrip{display:flex;flex-wrap:wrap;gap:5px}
+.hs{width:34px;height:34px;flex:none;border-radius:8px;display:flex;align-items:center;justify-content:center;font:600 12px var(--mono);color:var(--ink2);background:var(--glass2);border:1px solid var(--line)}
+.hs.full{background:#10b981;color:#fff;border-color:#10b981}
+.hs.part{background:rgba(16,185,129,.35);color:var(--ink)}
+.hs.miss{background:rgba(251,191,36,.3);border-color:rgba(245,158,11,.6)}
+.hs.today{background:var(--grad);color:#fff;border:0;box-shadow:0 0 0 2px rgba(34,211,238,.4)}
+.hs.fut{background:rgba(59,130,246,.10);border-color:rgba(59,130,246,.25)}
+.hs.none{opacity:.45}
+.lg{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:5px;vertical-align:-2px}
+.lg.full{background:#10b981}.lg.part{background:rgba(16,185,129,.35)}.lg.miss{background:rgba(251,191,36,.5)}.lg.today{background:var(--grad)}.lg.fut{background:rgba(59,130,246,.2)}
+.ptable-wrap{padding:0;overflow:auto;max-height:70vh}
+.ptable{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:1100px;width:100%}
+.ptable th,.ptable td{padding:6px 6px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);vertical-align:top;text-align:center}
+.ptable thead th{position:sticky;top:0;background:var(--panel);z-index:2;font-weight:700;color:var(--muted);font-size:11.5px}
+.ptable thead tr:nth-child(2) th{top:29px}
+.ptable thead th.grp{color:var(--ink)}
+.ptable tbody th{position:sticky;left:0;background:var(--panel);z-index:1;text-align:left;white-space:nowrap;font-weight:600}
+.ptable tbody th a{color:var(--ink)}
+.ptable tr.trow th,.ptable tr.trow td{background:rgba(34,211,238,.08)}
+.ptable tr.erow th,.ptable tr.erow td{background:rgba(251,113,133,.12);font-weight:800;color:var(--ko)}
+.pc{display:inline-block;padding:2px 6px;border-radius:6px;margin:1px;white-space:nowrap;font-family:var(--mono);font-size:11.5px}
+.pc.c-done{background:rgba(16,185,129,.18);color:#059669}
+.pc.c-today{background:rgba(34,211,238,.2);color:#0e7490;font-weight:700}
+.pc.c-fut{background:var(--glass2);color:var(--ink2)}
+.pc.c-miss{background:rgba(251,191,36,.25);color:#b45309;text-decoration:line-through}
+body.light .ptable thead th,body.light .ptable tbody th{background:#fff}
+
+/* evita que contenidos anchos (tablas) desborden la página en el móvil */
+.shell>div{min-width:0}
+main{min-width:0}
+.card{min-width:0}
