@@ -242,9 +242,17 @@ const NAV = [
   { g: 'Seguimiento', items: [['planning', 'cal', 'Planning'], ['stats', 'chart', 'Estadísticas'], ['ajustes', 'gear', 'Ajustes']] },
 ];
 const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); TITLES.practicar = 'Practicar'; TITLES.mas = 'Más';
+const THEME_KEY = 'opo_theme';
+const theme = () => localStorage.getItem(THEME_KEY) || 'light';
+function applyTheme(inApp) {
+  const light = inApp && theme() === 'light';
+  document.body.classList.toggle('light', light);
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = light ? '#ffffff' : '#05080f';
+}
 const initials = n => (n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
 function shell() {
+  applyTheme(true);
   const nm = SESS.name || SESS.user || 'Invitado';
   $('#root').innerHTML = `<div class="shell">
     <aside class="side">
@@ -826,12 +834,14 @@ routes['ajustes'] = () => {
   <div class="card"><div class="row"><div class="avatar" style="width:46px;height:46px;font-size:17px">${esc(initials(SESS.name || SESS.user))}</div><div style="flex:1"><div style="font-weight:700">${esc(SESS.name || 'Invitado')}</div><div class="small muted">${SESS.local ? 'Sin cuenta · solo este dispositivo' : '@' + esc(SESS.user) + ' · sincronizado entre dispositivos'}</div></div>
   ${SESS.local ? `<button class="btn" id="toAcc">Crear cuenta / entrar</button>` : `<button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button>`}</div>
   ${SESS.local ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>
+  <div class="card row"><div style="flex:1"><h3>Apariencia</h3><div class="small muted">Se guarda en este dispositivo</div></div><div class="seg"><button data-th="light" class="${theme() === 'light' ? 'on' : ''}">Claro</button><button data-th="dark" class="${theme() === 'dark' ? 'on' : ''}">Oscuro</button></div></div>
   <div class="card"><h3>Prioridad de cada tema</h3><p class="small muted">Cuánto sale cada tema en «A boleo» y en el simulacro «con mis prioridades». 0 = no sale.</p>
   ${TOPICS.map(t => `<div class="row" style="flex-wrap:nowrap;margin:6px 0"><span style="min-width:120px" class="small">${t.short}</span><input type="range" min="0" max="5" step="0.5" value="${st.weights[t.id] ?? 0}" data-w="${t.id}" style="flex:1"><b class="mono" id="wv-${t.id}" style="width:30px;text-align:right">${st.weights[t.id] ?? 0}</b></div>`).join('')}
   <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="wReal">Proporción real 2023-25</button><button class="btn ghost sm" id="wDef">Mis prioridades (Meteo/Nav/FFHH)</button></div></div>
   <div class="card"><h3>Examen</h3><div class="grid"><div><label>Penalización por fallo</label><select id="pen"><option value="0">Sin penalización</option><option value="0.25">−0,25</option><option value="0.33">−0,33 (oficial)</option><option value="0.5">−0,5</option></select></div><div><label>Minutos del simulacro</label><input type="number" id="mins" value="${st.simMinutes}"></div></div>
   <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="onlyHl" ${st.onlyHl ? 'checked' : ''}><i></i></span> Solo preguntas de lo subrayado en amarillo</label></div>
   <div class="card"><h3>Copia de seguridad</h3><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="exp">Exportar progreso</button><label class="btn ghost sm" style="margin:0">Importar<input type="file" id="imp" accept=".json" hidden></label><span class="spacer"></span><button class="btn danger sm" id="rst">Borrar progreso</button></div></div>`);
+  $$('[data-th]').forEach(b => b.onclick = () => { localStorage.setItem(THEME_KEY, b.dataset.th); applyTheme(true); render(); });
   $('#pen').value = String([0, 0.25, 0.33, 0.5].reduce((a, b) => Math.abs(b - st.penalty) < Math.abs(a - st.penalty) ? b : a));
   const ta = $('#toAcc'); if (ta) ta.onclick = () => { SESS = null; localStorage.removeItem(SESS_KEY); boot('register'); };
   const sn = $('#syncNow'); if (sn) sn.onclick = () => sync(true);
@@ -850,6 +860,7 @@ routes['ajustes'] = () => {
 
 /* ---------- Acceso ---------- */
 function authView(mode = 'login') {
+  applyTheme(false);
   $('#root').innerHTML = `<div class="auth">
     <section class="hero">
       <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC</span></div>
