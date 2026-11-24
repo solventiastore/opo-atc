@@ -197,7 +197,7 @@ input[type=date]{color-scheme:dark}
 .prose li::marker{color:var(--cyan)}
 .prose p{margin:10px 0}
 .prose mark{background:rgba(251,191,36,.25);color:#fde68a;padding:0 3px;border-radius:4px}
-.prose blockquote{margin:14px 0;padding:10px 14px;border-left:3px solid var(--amber);background:rgba(251,191,36,.07);border-radius:0 10px 10px 0;color:#fde68a}
+.prose blockquote{margin:14px 0;padding:12px 14px;border:1px solid rgba(251,191,36,.3);background:rgba(251,191,36,.07);border-radius:14px;color:#fde68a}
 .prose blockquote p{margin:0}
 .prose table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14.5px;display:block;overflow-x:auto}
 .prose th,.prose td{border:1px solid var(--line2);padding:8px 10px;text-align:left;vertical-align:top}
@@ -210,7 +210,8 @@ input[type=date]{color-scheme:dark}
 .cloze strong.rev *{visibility:visible}
 .pagehead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .photo{width:100%;border-radius:14px;border:1px solid var(--line2);margin:10px 0}
-.hlblock{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);padding:12px 14px;margin:10px 0;border-radius:0 12px 12px 0;line-height:1.6}
+.hlblock{background:var(--panel);border:1px solid var(--line);padding:12px 14px;margin:10px 0;border-radius:14px;line-height:1.6}
+.hlblock .p{display:inline-block;background:rgba(251,191,36,.18);color:#b45309;padding:1px 8px;border-radius:99px;margin-bottom:6px}
 .hlblock .p{font-size:11.5px;color:var(--muted);font-family:var(--mono);margin-bottom:4px}
 .hlblock mark{background:rgba(34,211,238,.25);color:#fff}
 
@@ -356,3 +357,8 @@ body.light .ptable thead th,body.light .ptable tbody th{background:#fff}
 .shell>div{min-width:0}
 main{min-width:0}
 .card{min-width:0}
+
+/* etiqueta del tema en tareas */
+.tbadge{flex:none;width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font:700 13px var(--mono);color:var(--tc);background:color-mix(in srgb,var(--tc) 14%,transparent);border:1px solid color-mix(in srgb,var(--tc) 30%,transparent)}
+.tbadge svg{width:18px;height:18px}
+.task.done .tbadge{filter:grayscale(.6)}

@@ -478,6 +478,8 @@ routes[''] = () => {
 };
 
 /* ---------- Hoy toca (plan adaptativo) ---------- */
+// etiqueta del tema (en lugar de una franja de color a la izquierda)
+const tbadge = tp => { const x = TOP[tp]; return `<span class="tbadge" style="--tc:${x?.c || '#94a3b8'}" title="${esc(tname(tp))}">${x ? 'T' + x.n : tp === 'psico' ? icon('brain') : icon('globe')}</span>`; };
 function taskCard(it, day) {
   const d = P.done(it.key), on = P.doneOn(it.key); const t = TOP[it.t]; const isPast = day < ymd();
   let title, desc, actions = '';
@@ -492,7 +494,7 @@ function taskCard(it, day) {
     actions = `<button class="btn sm" data-q="${it.key}">${icon('play')} Hacer</button>`;
   } else { title = 'Psicotécnicos'; desc = esc(it.n || '30 min'); }
   const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast ? '<span class="pill amber">pendiente → se ha recolocado</span>' : '');
-  return `<div class="task ${d ? 'done' : ''}" style="border-left:3px solid ${t?.c || '#94a3b8'}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>
+  return `<div class="task ${d ? 'done' : ''}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>${tbadge(it.t)}
     <div class="body"><div class="tt">${title} ${badge}</div><div class="small muted" style="margin:3px 0 8px">${desc}</div><div class="row">${actions}</div></div></div>`;
 }
 function bindTasks(items, back) {
@@ -653,7 +655,7 @@ routes['temario'] = (args) => {
     $('#pages').innerHTML = T.pages.filter(([, t]) => !re || re.test(t)).map(([p, t]) => `<div class="hlblock" id="p${p}"><div class="p">PÁGINA ${p}</div>${re ? esc(t).replace(new RegExp(esc(f).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`) : esc(t)}</div>`).join('') || '<div class="empty">Sin resultados</div>';
   };
   draw(''); $('#f').oninput = e => draw(e.target.value.trim());
-  if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.hlblock').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.style.borderLeftColor = 'var(--cyan)'; } }, 60);
+  if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.hlblock').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.style.borderColor = 'var(--cyan)'; el.style.boxShadow = '0 0 0 3px rgba(34,211,238,.18)'; } }, 60);
 };
 
 /* ---------- Cambios del temario 2026 ---------- */
@@ -734,7 +736,7 @@ routes['repaso'] = () => {
   up.sort((a, b) => a.d.localeCompare(b.d));
   app(`${head('Practicar', 'Repaso 1 · 3 · 7 días', 'Lo que estudias un día (bloques de cuestionario nuevos, páginas de resumen o lo que apuntes en Planning) se te vuelve a preguntar al día siguiente, a los 3 días y a los 7.')}
   <h2>Para hoy · ${dr.length}</h2>
-  ${dr.length ? dr.map((x, i) => `<div class="task" style="border-left:3px solid ${TOP[x.e.topic]?.c}"><div class="body"><div class="row"><span class="tt">${esc(tname(x.e.topic))}</span><span class="pill violet">día ${x.k}</span>${x.due < ymd() ? '<span class="pill ko">atrasado</span>' : ''}</div><div class="small muted">Estudiado el ${fmtDate(x.e.d)} · ${x.e.ids.length} preguntas${x.e.label ? ' · ' + esc(x.e.label) : ''}</div></div><button class="btn sm" data-r="${i}">${icon('play')} Repasar</button></div>`).join('') : `<div class="card empty">${icon('check')}<div>Nada pendiente hoy</div></div>`}
+  ${dr.length ? dr.map((x, i) => `<div class="task">${tbadge(x.e.topic)}<div class="body"><div class="row"><span class="tt">${esc(tname(x.e.topic))}</span><span class="pill violet">día ${x.k}</span>${x.due < ymd() ? '<span class="pill ko">atrasado</span>' : ''}</div><div class="small muted">Estudiado el ${fmtDate(x.e.d)} · ${x.e.ids.length} preguntas${x.e.label ? ' · ' + esc(x.e.label) : ''}</div></div><button class="btn sm" data-r="${i}">${icon('play')} Repasar</button></div>`).join('') : `<div class="card empty">${icon('check')}<div>Nada pendiente hoy</div></div>`}
   <h2>Próximos</h2>
   ${up.length ? `<div class="card tblwrap"><table class="tbl"><tr><th>Fecha</th><th>Tema</th><th>Repaso</th><th>Preguntas</th></tr>${up.slice(0, 30).map(x => `<tr><td>${fmtDate(x.d)}</td><td>${esc(tname(x.e.topic))}</td><td>día ${x.k}</td><td class="mono">${x.e.ids.length}</td></tr>`).join('')}</table></div>` : '<p class="muted">Aún no hay nada programado.</p>'}`);
   $$('[data-r]').forEach(b => b.onclick = () => { const x = dr[+b.dataset.r]; startQuiz({ title: `Repaso día ${x.k} · ${tname(x.e.topic)}`, list: shuffle(x.e.ids), back: '#/repaso', onFinish: z => { if (z.i >= z.list.length) { x.e.done = Object.assign({}, x.e.done, { [x.k]: now() }); x.e.u = now(); save(); } } }); });
