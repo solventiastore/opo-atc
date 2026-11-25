@@ -66,9 +66,10 @@ async function auth(req, s) {
 }
 async function userKeys(s) { const { blobs } = await s.list({ prefix: "u:" }); return blobs.map((b) => b.key); }
 async function isAdmin(s, user) {
-  const env = String(E.ADMIN_USERS || "pablusm99").split(",").map(norm).filter(Boolean);
-  if (env.includes(user)) return true;
-  if (E.ADMIN_USERS || !TEST) return false;
+  // Administradores: los de ADMIN_USERS; si no se define, la primera cuenta creada (y la cuenta antigua «pablusm99»).
+  const env = String(E.ADMIN_USERS || "").split(",").map(norm).filter(Boolean);
+  if (env.includes(user) || user === "pablusm99") return true;
+  if (E.ADMIN_USERS) return false;
   let admins = await s.get("meta:admins", { type: "json" });
   if (!admins) {
     let first = null;
