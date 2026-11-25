@@ -528,3 +528,18 @@ h2.sub svg{width:18px;height:18px;color:var(--cyan)}
 .pwbox .eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center}
 .pwbox .eye:hover{background:var(--glass2);color:var(--ink)}
 .pwbox .eye svg{width:18px;height:18px}
+
+/* Cuenta: accesos a Mi perfil y Plan y pagos */
+.acclinks{display:grid;gap:10px;margin-top:14px}
+@media(min-width:700px){.acclinks{grid-template-columns:1fr 1fr}}
+.acclinks a{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:var(--glass);color:var(--ink)}
+.acclinks a:hover{background:var(--glass2)}
+.acclinks a>svg:first-child{width:22px;height:22px;color:var(--cyan);flex:none}
+.acclinks a div{flex:1;min-width:0}
+.acclinks b{display:block;font-size:15px}
+.acclinks span{display:block;font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.planic{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--grad);color:#fff;flex:none;box-shadow:0 12px 26px -12px rgba(37,99,235,.6)}
+.planic svg{width:22px;height:22px}
+details>summary.btn{list-style:none;cursor:pointer}
+details>summary.btn::-webkit-details-marker{display:none}
+#plansBox .plans{margin-top:8px}

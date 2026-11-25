@@ -45,6 +45,8 @@ const IC = {
   flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3.2.4 1.6 1.6 2.7 2.5 2.7z"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  receipt: '<path d="M5 2h14v20l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
@@ -398,7 +400,7 @@ const NAV = [
   { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Estudiar'], ['memorizar', 'brain', 'Memorizar'], ['ingles', 'globe', 'Inglés'], ['psicotecnicos', 'brain', 'Psicotécnicos']] },
   { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['temario', 'marker', 'Temario oficial']] },
 ];
-const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); Object.assign(TITLES, { resumenes: 'Estudiar', practicar: 'Practicar', mas: 'Más', plan: 'Mi plan', planning: 'Planning', stats: 'Estadísticas', ajustes: 'Ajustes', cuenta: 'Ajustes', codigos: 'Códigos de invitación', bienvenida: 'Tu plan', psicotecnicos: 'Psicotécnicos' });
+const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); Object.assign(TITLES, { perfil: 'Mi perfil', suscripcion: 'Plan y pagos', resumenes: 'Estudiar', practicar: 'Practicar', mas: 'Más', plan: 'Mi plan', planning: 'Planning', stats: 'Estadísticas', ajustes: 'Ajustes', cuenta: 'Ajustes', codigos: 'Códigos de invitación', bienvenida: 'Tu plan', psicotecnicos: 'Psicotécnicos' });
 const THEME_KEY = 'opo_theme';
 const theme = () => localStorage.getItem(THEME_KEY) || 'light';
 function applyTheme(inApp) {
@@ -440,7 +442,8 @@ function profileMenu(anchor) {
   const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.name || SESS.user;
   const m = document.createElement('div'); m.className = 'pmenu'; m.setAttribute('role', 'menu');
   m.innerHTML = `<div class="who"><div class="avatar">${esc(initials(nm))}</div><div><b>${esc(nm)}</b><span>${esc(ME.email || SESS.user || '')}</span></div></div>
-    <a href="#/plan">${icon('grid')} Mi plan</a><a href="#/bienvenida?edit=1">${icon('target')} Cambiar mi plan</a><a href="#/planning">${icon('cal')} Planning</a><a href="#/stats">${icon('chart')} Estadísticas</a>
+    <a href="#/perfil">${icon('user')} Mi perfil</a><a href="#/suscripcion">${icon('card')} Plan y pagos</a>
+    <div class="sep"></div><a href="#/plan">${icon('grid')} Mi plan de estudio</a><a href="#/bienvenida?edit=1">${icon('target')} Cambiar mi plan</a><a href="#/planning">${icon('cal')} Planning</a><a href="#/stats">${icon('chart')} Estadísticas</a>
     <div class="sep"></div><a href="#/ajustes">${icon('gear')} Ajustes y cuenta</a>${ME.admin ? `<a href="#/codigos">${icon('star')} Códigos de invitación</a>` : ''}
     <button data-pm="theme">${icon(theme() === 'light' ? 'eye' : 'sun')} ${theme() === 'light' ? 'Tema oscuro' : 'Tema claro'}</button><button data-pm="sync">${icon('refresh')} Sincronizar ahora</button>
     <div class="sep"></div><button data-pm="out" class="danger">${icon('logout')} Cerrar sesión</button>`;
@@ -1236,16 +1239,20 @@ routes['stats'] = () => {
 
 /* ---------- Ajustes y cuenta ---------- */
 const PLAN_NAMES = { teoria: 'Fase I · Teoría', ingles: 'Fase I · Teoría + Inglés', completo: 'Fase I · Teoría + Inglés + Psicotécnicos' };
-function accountCard() {
-  const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.name || SESS.user;
+const planInfo = () => {
   const pl = ME.plan; const active = pl && ['active', 'trialing', 'past_due'].includes(pl.status);
-  const planLine = ME.admin ? 'Administrador · acceso completo' : ME.comp ? `${PLAN_NAMES[ME.comp] || 'Acceso completo'} · código de acceso` : active ? `${PLAN_NAMES[pl.id] || pl.id}${pl.cancelAt ? ` · se cancela el ${new Date(pl.cancelAt * 1000).toLocaleDateString('es-ES')}` : pl.end ? ` · se renueva el ${new Date(pl.end * 1000).toLocaleDateString('es-ES')}` : ''}` : 'Acceso completo';
+  const dt = x => new Date(x * 1000).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+  if (active) return { name: PLAN_NAMES[pl.id] || pl.id, active: true, sub: true, line: pl.status === 'past_due' ? 'Pago pendiente: revisa tu tarjeta' : pl.cancelAt ? `Cancelada: tienes acceso hasta el ${dt(pl.cancelAt)}` : pl.end ? `Se renueva el ${dt(pl.end)}` : 'Activo' };
+  if (ME.admin) return { name: 'Administrador', active: true, line: 'Acceso completo a todo' };
+  if (ME.comp) return { name: PLAN_NAMES[ME.comp] || 'Acceso completo', active: true, line: 'Gratis con código de invitación' };
+  return { name: 'Acceso completo', active: true, line: 'Cuenta de los inicios de Opo ATC' };
+};
+function accountCard() {
+  const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.name || SESS.user; const pi = planInfo();
   return `<div class="card"><div class="row"><div class="avatar" style="width:46px;height:46px;font-size:17px">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:700">${esc(nm)}</div><div class="small muted">${esc(ME.email || SESS.user)} · sincronizado entre dispositivos</div></div>
     <button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button></div>
-    <div class="planbox"><div><div class="tiny">Tu plan</div><div style="font-weight:700;margin-top:2px">${esc(planLine)}</div></div><span class="spacer"></span>
-    ${active && pl.cust ? `<button class="btn sec sm" id="portal">${icon('gear')} Gestionar o cancelar suscripción</button>` : ''}
-    ${!has('psico') && ME.config?.payments ? `<a class="btn sm" href="#/mejorar">${icon('star')} Mejorar plan</a>` : ''}</div>
-    ${ME.google ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>`;
+    <div class="acclinks"><a href="#/perfil">${icon('user')}<div><b>Mi perfil</b><span>Nombre, email, contraseña y datos personales</span></div>${icon('chevR', 'chev')}</a>
+    <a href="#/suscripcion">${icon('card')}<div><b>Plan y pagos</b><span>${esc(pi.name)} · ${esc(pi.line)}</span></div>${icon('chevR', 'chev')}</a></div></div>`;
 }
 routes['cuenta'] = () => routes['ajustes']();
 routes['ajustes'] = () => {
@@ -1281,9 +1288,65 @@ routes['codigos'] = () => {
   app(`${head('Cuenta', 'Códigos de invitación', 'Cada código sirve para crear una sola cuenta con acceso completo. Pásaselo a quien quieras invitar.')}<div id="invCard"><div class="card empty">Cargando…</div></div>`);
   loadInvites();
 };
+/* ---------- Mi perfil ---------- */
+routes['perfil'] = () => {
+  const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.user;
+  const since = ME.created ? new Date(ME.created).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '';
+  app(`${head('Cuenta', 'Mi perfil', 'Tus datos personales y de acceso.')}
+  <div class="card row" style="gap:16px"><div class="avatar" style="width:58px;height:58px;font-size:21px">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:18px">${esc(nm)}</div><div class="small muted">${esc(ME.email || ME.user)}${since ? ' · en Opo ATC desde ' + since : ''}</div></div></div>
+  <div class="card"><h3>Datos personales</h3>
+    <div class="g2"><div><label>Nombre</label><input id="pnm" value="${esc(ME.name || '')}" autocomplete="given-name"></div><div><label>Apellidos</label><input id="psn" value="${esc(ME.surname || '')}" autocomplete="family-name"></div></div>
+    <div class="g2"><div><label>Fecha de nacimiento</label><input id="pbd" type="date" value="${esc(ME.birth || '')}" max="${ymd()}"></div><div><label>Cómo nos conociste</label><input value="${esc(ME.source || '—')}" disabled></div></div>
+    <label class="chk" style="margin-top:14px"><span class="switch"><input type="checkbox" id="pmk" ${ME.marketing ? 'checked' : ''}><i></i></span> Quiero recibir novedades de la oposición</label>
+    <div class="row" style="margin-top:16px"><button class="btn" id="psave">${icon('check')} Guardar cambios</button><span class="small err" id="perr"></span></div></div>
+  <div class="card"><h3>Email</h3><p class="small muted">Tu email actual es <b>${esc(ME.email || ME.user)}</b>. Si lo cambias, te enviaremos un enlace para confirmar el nuevo${ME.hasPass ? ' y te pediremos tu contraseña' : ''}.</p>
+    <details><summary class="btn ghost sm" style="display:inline-flex">Cambiar email</summary>
+    <div class="g2" style="margin-top:8px"><div><label>Email nuevo</label><input id="ne1" type="email" autocomplete="email"></div><div><label>Repite el email nuevo</label><input id="ne2" type="email" autocomplete="off" onpaste="return false"></div></div>
+    ${ME.hasPass ? '<label>Tu contraseña</label><input id="nep" type="password" autocomplete="current-password">' : ''}
+    <div class="row" style="margin-top:12px"><button class="btn sec" id="nesave">Cambiar email</button><span class="small err" id="neerr"></span></div></details></div>
+  ${ME.hasPass ? `<div class="card"><h3>Contraseña</h3>
+    <div class="g2"><div><label>Contraseña actual</label><input type="password" id="op" autocomplete="current-password"></div><div><label>Contraseña nueva</label><input type="password" id="np" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></div></div>
+    <label>Repite la contraseña nueva</label><input type="password" id="np2" autocomplete="new-password">
+    <div class="row" style="margin-top:12px"><button class="btn sec" id="chp">Cambiar contraseña</button><span class="small err" id="cperr"></span></div></div>` : `<div class="card"><h3>Acceso</h3><p class="small muted">Entras con tu cuenta de Google.</p></div>`}
+  <div class="card flat row"><div style="flex:1"><b>Eliminar cuenta</b><div class="small muted">Borra tu cuenta y todo tu progreso. Está en Ajustes → Tus datos.</div></div><a class="btn ghost sm" href="#/ajustes">Ir a Ajustes</a></div>`);
+  $('#psave').onclick = async () => { $('#perr').textContent = '';
+    try { const r = await api('account/update', { method: 'POST', body: { name: $('#pnm').value, surname: $('#psn').value, birth: $('#pbd').value, marketing: $('#pmk').checked } });
+      Object.assign(ME, r); SESS.name = r.name; localStorage.setItem(SESS_KEY, JSON.stringify(SESS)); toast('Datos guardados'); shell(); render(); }
+    catch (e) { $('#perr').textContent = e.message; } };
+  $('#nesave').onclick = async () => { $('#neerr').textContent = '';
+    try { const r = await api('account/email', { method: 'POST', body: { email: $('#ne1').value, email2: $('#ne2').value, pass: $('#nep')?.value || '' } });
+      const oldKey = stateKey(); SESS.user = r.user; localStorage.setItem(SESS_KEY, JSON.stringify(SESS)); localStorage.setItem(stateKey(), localStorage.getItem(oldKey) || JSON.stringify(S)); localStorage.removeItem(oldKey);
+      if (r.devLink) sessionStorage.setItem('devLink', r.devLink); toast('Email cambiado. Confírmalo con el enlace que te hemos enviado.'); setTimeout(() => location.reload(), 900); }
+    catch (e) { $('#neerr').textContent = e.message; } };
+  const cp = $('#chp'); if (cp) cp.onclick = async () => { $('#cperr').textContent = '';
+    if ($('#np').value !== $('#np2').value) { $('#cperr').textContent = 'Las dos contraseñas nuevas no coinciden'; return; }
+    try { await api('password', { method: 'POST', body: { old: $('#op').value, pass: $('#np').value } }); toast('Contraseña cambiada'); render(); } catch (e) { $('#cperr').textContent = e.message; } };
+};
+
+/* ---------- Plan y pagos ---------- */
+routes['suscripcion'] = () => {
+  const pi = planInfo(); const pay = !!ME.config?.payments; const cur = ME.plan && ['active', 'trialing', 'past_due'].includes(ME.plan.status) ? ME.plan.id : ME.comp;
+  app(`${head('Cuenta', 'Plan y pagos', 'Tu plan, tus pagos y tus facturas.')}
+  <div class="card hl"><div class="row" style="gap:14px"><div class="planic">${icon('star')}</div><div style="flex:1;min-width:0"><div class="tiny">Tu plan</div><div style="font-weight:800;font-size:19px;margin-top:2px">${esc(pi.name)}</div><div class="small muted">${esc(pi.line)}</div></div>
+    <span class="pill ${ME.plan?.status === 'past_due' ? 'amber' : 'ok'}">${ME.plan?.status === 'past_due' ? 'Pago pendiente' : ME.plan?.cancelAt ? 'Cancelada' : 'Activo'}</span></div>
+    ${pi.sub ? `<div class="row" style="margin-top:14px"><button class="btn sec sm" id="portal">${icon('card')} Método de pago, facturas y cancelar</button></div>` : ''}</div>
+  ${!pay ? `<div class="warnbox">${icon('alert')}<div>Ahora mismo Opo ATC funciona solo por invitación y los pagos aún no están activos. ${ME.comp || ME.admin ? 'Tu acceso es gratuito: no se te va a cobrar nada.' : ''}</div></div>` : ''}
+  <h2>${cur ? 'Cambiar de plan' : 'Planes'}</h2>
+  <p class="small muted" style="margin-top:-6px">${pay ? 'Si subes de plan, solo pagas la diferencia proporcional en tu próxima factura. Cancela cuando quieras.' : 'Estos serán los planes cuando se activen los pagos.'}</p>
+  <div id="plansBox">${OPO.planCards ? OPO.planCards(cur, null) : ''}</div>
+  <h2>Facturas</h2><div id="invBox" class="card"><div class="empty">${pi.sub ? 'Cargando…' : 'Aún no tienes facturas.'}</div></div>`);
+  if (!pay) $$('#plansBox [data-plan]').forEach(b => { b.disabled = true; b.textContent = b.textContent.includes('actual') ? 'Tu plan actual' : 'Próximamente'; });
+  else $$('#plansBox [data-plan]').forEach(b => b.onclick = async () => { b.disabled = true; try { await OPO.checkout(b.dataset.plan); } catch (e) { toast(e.message); b.disabled = false; } });
+  const pt = $('#portal'); if (pt) pt.onclick = async () => { try { await OPO.portal(); } catch (e) { toast(e.message); } };
+  if (pi.sub) api('billing/invoices').then(r => {
+    const box = $('#invBox'); if (!box) return; const l = r.invoices || [];
+    const st = { paid: '<span class="pill ok">Pagada</span>', open: '<span class="pill amber">Pendiente</span>', void: '<span class="pill">Anulada</span>', uncollectible: '<span class="pill ko">Impagada</span>' };
+    box.innerHTML = l.length ? `<div class="tblwrap"><table class="tbl"><tr><th>Fecha</th><th>Nº</th><th>Importe</th><th>Estado</th><th></th></tr>${l.map(i => `<tr><td>${new Date(i.date * 1000).toLocaleDateString('es-ES')}</td><td class="mono">${esc(i.number || '—')}</td><td class="mono">${(i.total / 100).toLocaleString('es-ES', { style: 'currency', currency: (i.currency || 'eur').toUpperCase() })}</td><td>${st[i.status] || esc(i.status)}</td><td style="text-align:right">${i.pdf ? `<a href="${esc(i.pdf)}" target="_blank" rel="noopener">${icon('receipt')} PDF</a>` : i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noopener">Ver</a>` : ''}</td></tr>`).join('')}</table></div>` : '<div class="empty">Aún no tienes facturas.</div>';
+  }).catch(() => { const box = $('#invBox'); if (box) box.innerHTML = '<div class="empty">No se han podido cargar las facturas.</div>'; });
+};
 /* ---------- Mejorar plan ---------- */
 routes['mejorar'] = () => {
-  if (!ME.config?.payments) { location.hash = '#/ajustes'; return; }
+  location.hash = '#/suscripcion'; return;
   app(`${head('Cuenta', 'Mejora tu plan', 'Cambia de plan cuando quieras. Se ajusta automáticamente en tu próxima factura.')}${OPO.planCards ? OPO.planCards(ME.comp || ME.plan?.id, null) : ''}`);
   $$('[data-plan]').forEach(b => b.onclick = async () => { b.disabled = true; try { await OPO.checkout(b.dataset.plan); } catch (e) { toast(e.message); b.disabled = false; } });
 };

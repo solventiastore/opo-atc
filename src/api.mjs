@@ -99,7 +99,8 @@ const profileDone = (u) => !u.v || !!(u.name && u.surname && u.birth && u.source
 const publicUser = async (s, u) => ({
   user: u.user, email: u.email || null, name: u.name, surname: u.surname || "", verified: !u.v || !!u.verified,
   profileDone: profileDone(u), admin: await isAdmin(s, u.user), plan: u.plan || null, comp: u.comp || null,
-  features: await features(s, u), google: !!u.google,
+  features: await features(s, u), google: !!u.google, hasPass: !!u.hash,
+  birth: u.birth || "", source: u.source || "", marketing: !!u.marketing, created: u.created || null,
   config: { test: TEST, payments: PAYMENTS, invite: INVITE_ONLY, google: !!E.GOOGLE_CLIENT_ID || TEST },
 });
 const siteUrl = (req) => (E.SITE_URL || new URL(req.url).origin).replace(/\/$/, "");
@@ -320,6 +321,37 @@ export async function handle(req, ctx) {
     return json(await publicUser(s, u));
   }
 
+  // --- Mi perfil: datos personales ---
+  if (p === "account/update" && req.method === "POST") {
+    const name = String(body.name || "").trim().slice(0, 60), surname = String(body.surname || "").trim().slice(0, 80), birth = String(body.birth || "");
+    if (name.length < 2) return json({ error: "Escribe tu nombre" }, 400);
+    if (surname.length < 2) return json({ error: "Escribe tus apellidos" }, 400);
+    if (birth && !ageOk(birth)) return json({ error: "Revisa la fecha de nacimiento (debes tener al menos 14 años)" }, 400);
+    Object.assign(u, { name, surname, birth: birth || u.birth, marketing: !!body.marketing });
+    await putUser(s, u);
+    return json(await publicUser(s, u));
+  }
+  // --- Mi perfil: cambiar el email (la cuenta se mueve al email nuevo y hay que confirmarlo) ---
+  if (p === "account/email" && req.method === "POST") {
+    const ne = norm(body.email);
+    if (!EMAIL_RE.test(ne)) return json({ error: "El email no es válido" }, 400);
+    if (ne !== norm(body.email2)) return json({ error: "Los dos emails no coinciden" }, 400);
+    if (ne === u.user) return json({ error: "Ese ya es tu email" }, 400);
+    if (u.hash && !safeEq(await hash(String(body.pass || ""), u.salt, u.it || OLD_ITER), u.hash)) { await sleep(400); return json({ error: "La contraseña no es correcta" }, 401); }
+    if (await getUser(s, ne)) return json({ error: "Ya hay una cuenta con ese email" }, 409);
+    const old = u.user; const data = await s.get("d:" + old);
+    Object.assign(u, { user: ne, email: ne, verified: false, v: u.v || 2 });
+    await putUser(s, u);
+    if (data) await s.set("d:" + ne, data);
+    await s.setJSON("s:" + me.tok, { ...me, tok: undefined, user: ne });
+    const admins = await s.get("meta:admins", { type: "json" });
+    if (admins && admins.includes(old)) await s.setJSON("meta:admins", admins.map((x) => (x === old ? ne : x)));
+    if (u.plan?.cust) await s.setJSON("cus:" + u.plan.cust, { user: ne });
+    await s.delete("d:" + old); await s.delete("u:" + old);
+    const ver = await sendVerification(s, req, u);
+    return json({ ...(await publicUser(s, u)), ...(TEST || !E.RESEND_API_KEY ? { devLink: ver.link } : {}) });
+  }
+
   // --- Pagos ---
   if (p === "billing/checkout" && req.method === "POST") {
     const plan = PLANS[body.plan]; if (!plan || plan.later) return json({ error: "Plan no disponible" }, 400);
@@ -370,9 +402,14 @@ export async function handle(req, ctx) {
     if (cs.status === "complete" && cs.subscription) await applySubscription(s, u.user, cs.metadata?.plan, cs.subscription, cs.customer);
     return json(await publicUser(s, await getUser(s, u.user)));
   }
+  if (p === "billing/invoices" && req.method === "GET") {
+    if (!u.plan?.cust || !E.STRIPE_SECRET_KEY) return json({ invoices: [] });
+    const r = await stripe("GET", `invoices?customer=${encodeURIComponent(u.plan.cust)}&limit=24`);
+    return json({ invoices: (r.data || []).map((i) => ({ id: i.id, number: i.number, date: i.created, total: i.total, currency: i.currency, status: i.status, url: i.hosted_invoice_url, pdf: i.invoice_pdf })) });
+  }
   if (p === "billing/portal" && req.method === "POST") {
     if (!u.plan?.cust || !E.STRIPE_SECRET_KEY) return json({ error: TEST ? "En modo pruebas no hay portal de pagos" : "No tienes ninguna suscripción" }, 400);
-    const portal = await stripe("POST", "billing_portal/sessions", { customer: u.plan.cust, return_url: siteUrl(req) + "/app.html#/cuenta" });
+    const portal = await stripe("POST", "billing_portal/sessions", { customer: u.plan.cust, return_url: siteUrl(req) + "/app.html#/suscripcion" });
     return json({ url: portal.url });
   }
   if (p === "billing/cancel-test" && req.method === "POST" && TEST) { if (u.plan) { u.plan.status = "canceled"; await putUser(s, u); } return json(await publicUser(s, u)); }
