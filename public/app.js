@@ -659,6 +659,23 @@ function bindTasks(items, back) {
   });
 }
 const taskMins = items => items.reduce((a, i) => a + (i.mins || 0), 0);
+// Hoy toca: tareas agrupadas por tipo
+const TASK_GROUPS = [
+  { id: 'res', title: 'Estudiar', sub: 'Páginas del resumen', ic: 'book', cls: 'g-res', ks: ['res'] },
+  { id: 'q', title: 'Tests de cuestionario', sub: 'Preguntas de lo que estudias', ic: 'layers', cls: 'g-q', ks: ['qp', 'q'] },
+  { id: 'rep', title: 'Repasos', sub: 'Lo que ya estudiaste', ic: 'repeat', cls: 'g-rep', ks: ['ciclo', 'fall', 'sim'] },
+  { id: 'eng', title: 'Inglés', sub: 'Tipo examen, con la regla explicada', ic: 'globe', cls: 'g-eng', ks: ['eng'] },
+  { id: 'psico', title: 'Psicotécnicos', sub: 'Series, cálculo, atención y memoria', ic: 'brain', cls: 'g-psico', ks: ['psico'] },
+];
+function taskGroups(items, day) {
+  return TASK_GROUPS.map(g => {
+    const its = items.filter(i => g.ks.includes(i.k)); if (!its.length) return '';
+    const dn = its.filter(i => P.done(i.key)).length, mins = taskMins(its.filter(i => !P.done(i.key)));
+    return `<section class="tgroup ${g.cls}"><header class="tgh"><span class="tgi">${icon(g.ic)}</span><div><b>${g.title}</b><span>${g.sub}</span></div>
+      <em>${dn === its.length ? `${icon('check')} Hecho` : `${dn}/${its.length}${mins ? ` · ${mins >= 60 ? (Math.round(mins / 6) / 10).toString().replace('.', ',') + ' h' : Math.round(mins) + ' min'}` : ''}`}</em></header>
+      ${its.map(it => taskCard(it, day)).join('')}</section>`;
+  }).join('');
+}
 routes['hoy'] = (args, q) => {
   const t = ymd(); const day = q.f || t; const isToday = day === t, isPast = day < t;
   const items = P.itemsFor(day); const off = P.isOff(day), fin = P.isFinal(day);
@@ -670,7 +687,7 @@ routes['hoy'] = (args, q) => {
   <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${off ? 'Día libre: descansa 😌' : day >= P.examDate() ? 'Día del examen ✈ ¡Mucha suerte!' : items.length ? `${items.length} tareas${mins ? ` · ~${mins >= 60 ? (Math.round(mins / 6) / 10).toString().replace('.', ',') + ' h' : Math.round(mins) + ' min'} pendientes` : ' · ¡todo hecho!'}` : 'Sin temario nuevo: repasos y falladas'}${fin && !off ? ' · <span class="pill cyan">repaso final</span>' : ''}</div>
     <div class="small muted">Quedan ${st.left} tareas de temario · examen el ${fmtDate(P.examDate(), { day: 'numeric', month: 'long' })}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
   ${items.some(i => i.late) ? `<h2 class="sub">${icon('alert')} Acumulado para ponerte al día <span class="pill amber">${items.filter(i => i.late && !P.done(i.key)).length}</span></h2><p class="small muted" style="margin:-6px 0 8px">Lo que tocaba en días anteriores y aún no has hecho. Hazlo primero y vuelves a ir al día.</p>${items.filter(i => i.late).map(it => taskCard(it, day)).join('')}<h2 class="sub">${icon('sun')} Lo de hoy</h2>` : ''}
-  ${items.filter(i => !i.late).map(it => taskCard(it, day)).join('') || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
+  ${taskGroups(items.filter(i => !i.late), day) || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
   ${isToday && nextN && !off ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo siguiente?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
   <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a></div>`);
   $$('[data-f]').forEach(b => b.onclick = () => { location.hash = '#/hoy?f=' + b.dataset.f; });

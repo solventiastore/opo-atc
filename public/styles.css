@@ -637,3 +637,18 @@ button.hs{cursor:pointer;font:inherit}
 @media(max-width:600px){.plist .pdh{width:86px}.pnav b{width:100%;margin:6px 0 0}}
 @media(max-width:700px){.pfilt{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.pfilt::-webkit-scrollbar{display:none}.pfilt .chip{flex:none}}
 .pdh span{white-space:nowrap}
+
+/* Hoy toca: bloques por tipo de tarea */
+.tgroup{--gc:#0891b2;background:color-mix(in srgb,var(--gc) 5%,transparent);border-radius:22px;padding:12px;margin:14px 0}
+.tgroup .task{margin:8px 0 0}
+.tgroup .task:first-of-type{margin-top:4px}
+.tgh{display:flex;align-items:center;gap:12px;padding:4px 6px 8px}
+.tgh div{flex:1;min-width:0}
+.tgh b{display:block;font-size:16px}
+.tgh span:not(.tgi){font-size:12.5px;color:var(--muted)}
+.tgi{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:var(--gc);color:#fff;flex:none;box-shadow:0 8px 18px -10px var(--gc)}
+.tgi svg{width:18px;height:18px}
+.tgh em{font-style:normal;font-size:12.5px;font-weight:700;color:var(--gc);background:color-mix(in srgb,var(--gc) 12%,transparent);padding:4px 10px;border-radius:99px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+.tgh em svg{width:13px;height:13px}
+.g-res{--gc:#0891b2}.g-q{--gc:#2563eb}.g-rep{--gc:#7c3aed}.g-eng{--gc:#059669}.g-psico{--gc:#d97706}
+.g-eng .tbadge,.g-psico .tbadge,.g-rep .tbadge{display:none}
