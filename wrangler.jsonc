@@ -1,0 +1,16 @@
+// Configuración de Cloudflare Workers (se publica sola al subir a la rama main).
+{
+  "name": "opoatc",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "opo-atc", "database_id": "2d1a36eb-5a99-4eee-95b1-ab4289dfdf08" }
+  ],
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}
