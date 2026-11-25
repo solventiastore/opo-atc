@@ -16,6 +16,19 @@ import path from "node:path";
 
 const E = process.env;
 const TEST = E.TEST_MODE === "1";
+// De momento: solo se crean cuentas con un código de invitación de un solo uso (OPEN_SIGNUP=1 para abrir el registro)
+const INVITE_ONLY = E.OPEN_SIGNUP !== "1";
+// Los pagos están apagados hasta que PAYMENTS=1 (y Stripe configurado)
+const PAYMENTS = E.PAYMENTS === "1" && (!!E.STRIPE_SECRET_KEY || TEST);
+async function captchaOk(token, ip) {
+  if (!E.RECAPTCHA_SECRET) return true;
+  if (!token) return false;
+  try {
+    const r = await fetch("https://www.google.com/recaptcha/api/siteverify", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ secret: E.RECAPTCHA_SECRET, response: String(token), ...(ip ? { remoteip: ip } : {}) }).toString() });
+    const d = await r.json(); return !!d.success;
+  } catch (e) { return false; }
+}
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const redirect = (url) => new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store" } });
@@ -50,8 +63,9 @@ async function auth(req, s) {
 }
 async function userKeys(s) { const { blobs } = await s.list({ prefix: "u:" }); return blobs.map((b) => b.key); }
 async function isAdmin(s, user) {
-  const env = String(E.ADMIN_USERS || "").split(",").map(norm).filter(Boolean);
-  if (env.length) return env.includes(user);
+  const env = String(E.ADMIN_USERS || "pablusm99").split(",").map(norm).filter(Boolean);
+  if (env.includes(user)) return true;
+  if (E.ADMIN_USERS || !TEST) return false;
   let admins = await s.get("meta:admins", { type: "json" });
   if (!admins) {
     let first = null;
@@ -82,7 +96,7 @@ const publicUser = async (s, u) => ({
   user: u.user, email: u.email || null, name: u.name, surname: u.surname || "", verified: !u.v || !!u.verified,
   profileDone: profileDone(u), admin: await isAdmin(s, u.user), plan: u.plan || null, comp: u.comp || null,
   features: await features(s, u), google: !!u.google,
-  config: { test: TEST, payments: !!E.STRIPE_SECRET_KEY || TEST, google: !!E.GOOGLE_CLIENT_ID || TEST },
+  config: { test: TEST, payments: PAYMENTS, invite: INVITE_ONLY, google: !!E.GOOGLE_CLIENT_ID || TEST },
 });
 const siteUrl = (req) => (E.SITE_URL || new URL(req.url).origin).replace(/\/$/, "");
 function ageOk(birth) {
@@ -182,6 +196,9 @@ export default async (req) => {
   let body = {}; if (req.method === "POST") { try { body = JSON.parse(raw || "{}"); } catch { body = {}; } }
 
   // --- Webhook de Stripe ---
+  if (p === "config" && req.method === "GET") {
+    return json({ captcha: E.RECAPTCHA_SITE_KEY || null, invite: INVITE_ONLY, payments: PAYMENTS, google: !!E.GOOGLE_CLIENT_ID || TEST, test: TEST });
+  }
   if (p === "billing/webhook" && req.method === "POST") {
     if (!E.STRIPE_WEBHOOK_SECRET || !verifyStripeSig(raw, req.headers.get("stripe-signature"), E.STRIPE_WEBHOOK_SECRET)) return json({ error: "firma" }, 400);
     const ev = JSON.parse(raw); const o = ev.data?.object || {};
@@ -203,9 +220,11 @@ export default async (req) => {
     const pass = String(body.pass || "");
     if (pass.length < 8) return json({ error: "La contraseña debe tener al menos 8 caracteres" }, 400);
     if (!body.terms) return json({ error: "Debes aceptar los términos y la política de privacidad" }, 400);
+    if (!(await captchaOk(body.captcha, req.headers.get("x-nf-client-connection-ip")))) return json({ error: "Marca la casilla «No soy un robot»" }, 400);
     if (await getUser(s, v.email)) return json({ error: "Ya hay una cuenta con ese email. Entra con tu contraseña." }, 409);
     const firstUser = (await userKeys(s)).length === 0;
     let comp = null; const code = String(body.invite || "").trim().toUpperCase();
+    if (INVITE_ONLY && !code && !firstUser) return json({ error: "Necesitas un código de acceso para crear la cuenta" }, 403);
     if (code) {
       const inv = await s.get("inv:" + code, { type: "json" });
       if (!inv || inv.usedBy || inv.revoked) { await sleep(400); return json({ error: inv?.usedBy ? "Ese código ya se ha usado" : "Código de acceso no válido" }, 403); }
@@ -299,6 +318,7 @@ export default async (req) => {
   // --- Pagos ---
   if (p === "billing/checkout" && req.method === "POST") {
     const plan = PLANS[body.plan]; if (!plan || plan.later) return json({ error: "Plan no disponible" }, 400);
+    if (!PAYMENTS) return json({ error: "Los pagos todavía no están activados. De momento el acceso es con código." }, 503);
     if (u.v && !u.verified) return json({ error: "Confirma primero tu email" }, 403);
     if (!profileDone(u)) return json({ error: "Completa primero tus datos" }, 403);
     if (u.plan && ACTIVE.has(u.plan.status) && u.plan.sub && body.plan !== u.plan.id) {

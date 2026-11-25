@@ -1,6 +1,6 @@
 // Offline: cachea la app; la red tiene prioridad para que las actualizaciones lleguen.
-const C = 'opo-atc-v8';
-const ASSETS = ['app.html', 'styles.css', 'auth.js', 'app.js', 'manifest.webmanifest', 'icon.svg', 'assets/logo-mark.svg'];
+const C = 'opo-atc-v9';
+const ASSETS = ['app.html', 'styles.css', 'auth.js', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(ASSETS))); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

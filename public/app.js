@@ -99,7 +99,7 @@ const defaultSettings = () => ({
   penalty: 0.33, simMinutes: 50, examDate: '', planStart: '', planLen: 31,
   pages: { meteo: 20, ffhh: 20, carto: 14, nav: 18, aero: 8, fpl: 12, inst: 19, entorno: 3 }
 });
-const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, psy: {}, settings: defaultSettings() });
+const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, psy: {}, pace: { r: [], q: [] }, settings: defaultSettings() });
 let S = defaultState();
 function loadState() {
   let s = null; try { s = JSON.parse(localStorage.getItem(stateKey()) || 'null'); } catch (e) {}
@@ -133,6 +133,7 @@ function mergeState(a, b) {
     a[k] = [...m.values()];
   }
   if (b.plan && (!a.plan || (b.plan.u || 0) > (a.plan.u || 0))) a.plan = b.plan;
+  if (b.pace && (!a.pace || (b.pace.u || 0) > (a.pace.u || 0))) a.pace = b.pace;
   if ((b.settings?.u || 0) > (a.settings.u || 0)) a.settings = Object.assign(defaultSettings(), b.settings);
   return a;
 }
@@ -222,7 +223,20 @@ function markRead(t, a, b, label) {
    Se genera a partir de tus respuestas (fecha del examen, tiempo, días libres, prioridades) y del contenido:
    resúmenes por bloques de páginas y, tras cada bloque, las preguntas del cuestionario de esas páginas.
    Cada día se fija lo que toca al abrir la app; lo pendiente se recoloca solo en los días que quedan. */
-const MINS_PAGE = 30, MINS_Q = 0.6;
+// Ritmo: por defecto 2 páginas + sus preguntas ≈ 1 h. Se ajusta con lo que tarda cada usuario de verdad.
+const DEF_PAGE = 24, DEF_Q = 0.6;
+const Pace = {
+  page() { const r = (S.pace?.r || []).slice(-12); const pg = r.reduce((a, x) => a + x.p, 0), m = r.reduce((a, x) => a + x.m, 0);
+    return Math.round(Math.min(90, Math.max(8, (m + DEF_PAGE * 2) / (pg + 2)))); },
+  q() { const r = (S.pace?.q || []).slice(-150); const t = r.reduce((a, x) => a + x, 0);
+    return Math.min(3, Math.max(0.25, (t / 60 + DEF_Q * 10) / (r.length + 10))); },
+  measured: () => (S.pace?.r || []).length >= 2,
+  addRead(pages, mins) { if (!(mins >= 2 && mins <= pages * 120)) return; S.pace = S.pace || { r: [], q: [] }; S.pace.r = (S.pace.r || []).concat([{ p: pages, m: Math.round(mins) }]).slice(-30); S.pace.u = now(); P._sig = ''; },
+  addQ(sec) { if (!(sec >= 2 && sec <= 300)) return; S.pace = S.pace || { r: [], q: [] }; S.pace.q = (S.pace.q || []).concat([Math.round(sec)]).slice(-300); S.pace.u = now(); },
+};
+let READ = null;
+const readActive = () => READ ? READ.acc + (document.visibilityState === 'visible' ? now() - READ.from : 0) : 0;
+document.addEventListener('visibilitychange', () => { if (!READ) return; if (document.visibilityState === 'hidden') { READ.acc += now() - READ.from; } else READ.from = now(); });
 const WD = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const dow = ds => new Date(ds + 'T12:00:00').getDay();
 const defaultCfg = () => ({ examDate: S.settings.examDate || '', weeks: 10, start: ymd(), minWeek: 120, minWeekend: 180, off: [0], restEvery: 0,
@@ -239,10 +253,10 @@ const P = {
     return false;
   },
   isFinal: ds => ds > P.lastStudy() && ds <= P.end(),
-  cap(ds) { const c = P.cfg(); const base = (dow(ds) === 0 || dow(ds) === 6) ? +c.minWeekend : +c.minWeek; return Math.max(20, base - (has('ingles') ? +c.eng || 0 : 0) - (has('psico') ? +c.psico || 0 : 0)); },
+  cap(ds) { const c = P.cfg(); const base = (dow(ds) === 0 || dow(ds) === 6) ? +c.minWeekend : +c.minWeek; return Math.max(20, base - (has('ingles') ? +c.eng || 20 : 0) - (has('psico') ? +c.psico || 20 : 0)); },
   _tasks: null, _sig: '',
   tasks() {
-    const c = P.cfg(); const sig = JSON.stringify([c.level, c.priority, c.entorno, S.plan?.u || 0]);
+    const c = P.cfg(); const MP = Pace.page(), MQ = Pace.q(); const sig = JSON.stringify([c.level, c.priority, c.entorno, S.plan?.u || 0, MP, Math.round(MQ * 20)]);
     if (P._tasks && P._sig === sig) return P._tasks;
     const streams = {};
     const order = TOPICS.filter(t => t.id !== 'entorno' || c.entorno);
@@ -251,12 +265,12 @@ const P = {
       const step = c.level === 'repaso' ? 3 : 2;
       for (let i = 0; i < pages.length; i += step) {
         const a = pages[i], b = pages[Math.min(i + step, pages.length) - 1];
-        out.push({ key: `res:${t.id}:${a}-${b}`, k: 'res', t: t.id, a, b, mins: (b - a + 1) * MINS_PAGE * (c.level === 'repaso' ? 0.5 : 1) });
+        out.push({ key: `res:${t.id}:${a}-${b}`, k: 'res', t: t.id, a, b, mins: (b - a + 1) * MP * (c.level === 'repaso' ? 0.5 : 1) });
         const ids = qForPages(t.id, a, b).filter(id => !used.has(id)); ids.forEach(id => used.add(id));
-        for (let j = 0; j < ids.length; j += 25) { const part = ids.slice(j, j + 25); out.push({ key: `qp:${t.id}:${a}-${b}:${j}`, k: 'qp', t: t.id, a, b, ids: part, mins: Math.ceil(part.length * MINS_Q) + 5 }); }
+        for (let j = 0; j < ids.length; j += 25) { const part = ids.slice(j, j + 25); out.push({ key: `qp:${t.id}:${a}-${b}:${j}`, k: 'qp', t: t.id, a, b, ids: part, mins: Math.ceil(part.length * MQ) + 3 }); }
       }
       const rest = D.q.filter(x => x.t === t.id && !used.has(x.id)).sort((x, y) => x.n - y.n);
-      for (let j = 0; j < rest.length; j += 25) { const part = rest.slice(j, j + 25); out.push({ key: `q:${t.id}:${part[0].n}-${part[part.length - 1].n}`, k: 'q', t: t.id, a: part[0].n, b: part[part.length - 1].n, ids: part.map(x => x.id), mins: Math.ceil(part.length * MINS_Q) + 5 }); }
+      for (let j = 0; j < rest.length; j += 25) { const part = rest.slice(j, j + 25); out.push({ key: `q:${t.id}:${part[0].n}-${part[part.length - 1].n}`, k: 'q', t: t.id, a: part[0].n, b: part[part.length - 1].n, ids: part.map(x => x.id), mins: Math.ceil(part.length * MQ) + 3 }); }
       if (out.length) streams[t.id] = out;
     }
     let list = [];
@@ -319,14 +333,14 @@ const P = {
   // tareas diarias que no van en el temario (inglés, psicotécnicos, repaso final)
   recurring(key) {
     const m = /^d:(\d{4}-\d{2}-\d{2}):(\w+)$/.exec(key || ''); if (!m) return null; const c = P.cfg();
-    const mins = { eng: +c.eng, psico: +c.psico, sim: 70, fall: 40 }[m[2]]; if (mins == null) return null;
+    const mins = { eng: +c.eng || 20, psico: +c.psico || 20, sim: 70, fall: 40 }[m[2]]; if (mins == null) return null;
     return { key, d: m[1], k: m[2], t: m[2], mins };
   },
   dailyFor(ds) {
     if (P.isOff(ds) || ds > P.end()) return []; const c = P.cfg(); const out = [];
     if (P.isFinal(ds)) { out.push(`d:${ds}:sim`, `d:${ds}:fall`); }
-    if (has('ingles') && +c.eng > 0) out.push(`d:${ds}:eng`);
-    if (has('psico') && +c.psico > 0) out.push(`d:${ds}:psico`);
+    if (has('ingles')) out.push(`d:${ds}:eng`);
+    if (has('psico')) out.push(`d:${ds}:psico`);
     return out;
   },
   itemsFor(ds) {
@@ -348,11 +362,10 @@ const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' 
 
 /* ---------- Shell / navegación ---------- */
 const NAV = [
-  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario oficial'], ['cambios', 'alert', 'Cambios 2026']] },
+  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario oficial']] },
   { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['ingles', 'globe', 'Inglés'], ['psicotecnicos', 'brain', 'Psicotécnicos']] },
-  { g: 'Seguimiento', items: [['plan', 'grid', 'Mi plan'], ['planning', 'cal', 'Planning'], ['stats', 'chart', 'Estadísticas'], ['ajustes', 'gear', 'Ajustes']] },
 ];
-const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); TITLES.practicar = 'Practicar'; TITLES.mas = 'Más';
+const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); Object.assign(TITLES, { practicar: 'Practicar', mas: 'Más', plan: 'Mi plan', planning: 'Planning', stats: 'Estadísticas', ajustes: 'Ajustes', cuenta: 'Ajustes', codigos: 'Códigos de invitación', bienvenida: 'Tu plan', psicotecnicos: 'Psicotécnicos' });
 const THEME_KEY = 'opo_theme';
 const theme = () => localStorage.getItem(THEME_KEY) || 'light';
 function applyTheme(inApp) {
@@ -367,12 +380,12 @@ function shell() {
   const nm = SESS.name || SESS.user || 'Invitado';
   $('#root').innerHTML = `<div class="shell">
     <aside class="side">
-      <div class="logo"><img class="mark" src="assets/logo-mark.svg" alt=""><span>Opo<b>ATC</b><div class="tiny" style="letter-spacing:.08em">Fase I · controlador aéreo</div></span></div>
+      <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC<div class="tiny" style="letter-spacing:.08em">Fase I · Controlador</div></span></div>
       <nav>${NAV.map(g => `<div class="tiny grp">${g.g}</div>` + g.items.map(([r, ic, t]) => `<a href="#/${r}" data-r="${r}">${icon(ic)}<span>${t}</span><span class="cnt" data-cnt="${r}"></span></a>`).join('')).join('')}</nav>
-      <div class="me"><div class="avatar">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)}</div><div class="small muted">${esc(({ teoria: 'Plan Teoría', ingles: 'Plan Teoría + Inglés', completo: 'Plan Completo' })[ME.plan?.id] || (ME.admin ? 'Administrador' : ME.comp ? 'Acceso gratuito' : SESS.user))}</div></div><span id="syncDot" class="dot" title="Sincronización"></span></div>
+      <div class="me pmenu-wrap" id="pmSide" role="button" tabindex="0" aria-haspopup="menu"><div class="avatar">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)}</div><div class="small muted">${esc(({ teoria: 'Plan Teoría', ingles: 'Plan Teoría + Inglés', completo: 'Plan Completo' })[ME.plan?.id] || (ME.admin ? 'Administrador' : ME.comp ? 'Acceso gratuito' : SESS.user))}</div></div><span id="syncDot" class="dot" title="Sincronización"></span></div>
     </aside>
     <div>
-      <header class="topbar"><div class="logo"><img class="mark" src="assets/logo-mark.svg" alt=""></div><div class="ttl" id="ttl"></div><span id="syncDot2" class="dot"></span><a class="avatar" href="#/ajustes" title="Cuenta">${esc(initials(nm))}</a></header>
+      <header class="topbar"><div class="logo"><span class="mark">${icon('plane')}</span></div><div class="ttl" id="ttl"></div><span id="syncDot2" class="dot"></span><div class="pmenu-wrap"><button class="avatar btnlike" id="pmBtn" title="Tu perfil" aria-haspopup="menu">${esc(initials(nm))}</button></div></header>
       <main id="app"></main>
     </div>
   </div>
@@ -383,9 +396,28 @@ function shell() {
     <a href="#/falladas" data-t="falladas">${icon('x')}Falladas<span class="badge hidden" id="failBadge"></span></a>
     <a href="#/mas" data-t="mas">${icon('grid')}Más</a>
   </nav>`;
+  $('#pmBtn').onclick = e => { e.stopPropagation(); profileMenu($('#pmBtn').parentNode); };
+  $('#pmSide').onclick = e => { if (e.target.closest('.pmenu')) return; e.stopPropagation(); profileMenu($('#pmSide')); };
   // el punto de sincronización del móvil refleja el del escritorio
   const d1 = $('#syncDot'), d2 = $('#syncDot2');
   new MutationObserver(() => { d2.className = d1.className; d2.title = d1.title; }).observe(d1, { attributes: true });
+}
+function profileMenu(anchor) {
+  const old = $('.pmenu'); if (old) { old.remove(); return; }
+  const nm = [ME.name, ME.surname].filter(Boolean).join(' ') || SESS.name || SESS.user;
+  const m = document.createElement('div'); m.className = 'pmenu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="who"><div class="avatar">${esc(initials(nm))}</div><div><b>${esc(nm)}</b><span>${esc(ME.email || SESS.user || '')}</span></div></div>
+    <a href="#/plan">${icon('grid')} Mi plan</a><a href="#/bienvenida?edit=1">${icon('target')} Cambiar mi plan</a><a href="#/planning">${icon('cal')} Planning</a><a href="#/stats">${icon('chart')} Estadísticas</a>
+    <div class="sep"></div><a href="#/ajustes">${icon('gear')} Ajustes y cuenta</a>${ME.admin ? `<a href="#/codigos">${icon('star')} Códigos de invitación</a>` : ''}
+    <button data-pm="theme">${icon(theme() === 'light' ? 'eye' : 'sun')} ${theme() === 'light' ? 'Tema oscuro' : 'Tema claro'}</button><button data-pm="sync">${icon('refresh')} Sincronizar ahora</button>
+    <div class="sep"></div><button data-pm="out" class="danger">${icon('logout')} Cerrar sesión</button>`;
+  anchor.appendChild(m);
+  window.addEventListener('hashchange', () => m.remove(), { once: true });
+  m.onclick = e => { e.stopPropagation(); const b = e.target.closest('[data-pm]'); if (e.target.closest('a')) m.remove(); if (!b) return; m.remove();
+    if (b.dataset.pm === 'theme') { localStorage.setItem(THEME_KEY, theme() === 'light' ? 'dark' : 'light'); applyTheme(true); render(); }
+    if (b.dataset.pm === 'sync') sync(true);
+    if (b.dataset.pm === 'out' && confirm('¿Cerrar sesión en este dispositivo?')) logout(); };
+  setTimeout(() => document.addEventListener('click', function close(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', close); } }), 0);
 }
 function updateChrome(r) {
   $$('.side nav a').forEach(a => a.classList.toggle('on', a.dataset.r === r));
@@ -441,7 +473,7 @@ function nextQuestion() {
     if (QZ.i >= QZ.list.length) { if (QZ.requeue.length) { id = QZ.requeue.shift().id; QZ.isRe = true; } else return finishQuiz(); }
     else { id = QZ.list[QZ.i++]; QZ.isRe = false; }
   } else { id = QZ.next(QZ); QZ.isRe = false; if (!id) return finishQuiz(); }
-  QZ.cur = materialize(Q[id]); QZ.chosen = null; QZ.count++;
+  QZ.cur = materialize(Q[id]); QZ.chosen = null; QZ.count++; QZ.shown = now();
   QZ.seen.push(id); if (QZ.seen.length > 40) QZ.seen.shift();
   renderQuiz();
 }
@@ -449,6 +481,7 @@ function answer(idx) {
   if (QZ.chosen != null) return;
   const q = QZ.cur; QZ.chosen = idx; const ok = idx === q.a;
   ok ? QZ.ok++ : QZ.ko++;
+  if (QZ.shown && q.kind !== 'eng' && document.visibilityState === 'visible') Pace.addQ((now() - QZ.shown) / 1000);
   const first = record(q.id, ok);
   if (!ok && !QZ.isRe) QZ.requeue.push({ id: q.id, at: QZ.count });
   if (!ok && navigator.vibrate) navigator.vibrate(60);
@@ -539,9 +572,9 @@ routes[''] = () => {
   <a class="card hl" href="#/hoy" style="display:flex;gap:16px;align-items:center;color:inherit">
     ${ring(pct(doneN, items.length || 1), 70, 8, items.length ? `${doneN}/${items.length}` : '—')}
     <div style="flex:1"><div class="eyebrow" style="margin:0">Hoy toca · plan al ${pct(pst.done, pst.total)}% · quedan ${pst.left} tareas</div>
-    <div style="font-weight:650;margin-top:4px">${items.length ? items.slice(0, 4).map(i => `${TOP[i.t]?.short || tname(i.t)} ${itemLabel(i)}`).join(' · ') : 'Día libre o de repaso: falladas y repasos 1·3·7'}</div></div>${icon('chevR', 'chev')}</a>
+    <div style="font-weight:650;margin-top:4px">${items.length ? items.slice(0, 4).map(i => TOP[i.t] ? `${TOP[i.t].short} ${itemLabel(i)}` : itemLabel(i)).join(' · ') : 'Día libre o de repaso: falladas y repasos 1·3·7'}</div></div>${icon('chevR', 'chev')}</a>
   <div class="row" style="margin:14px 0 6px"><a class="btn" href="#/aleatorio">${icon('shuffle')} A boleo</a><a class="btn sec" href="#/cuestionarios">${icon('layers')} Cuestionarios</a><a class="btn sec" href="#/examenes">${icon('exam')} Simulacro</a></div>
-  ${R.cambios ? `<a class="card flat row" href="#/cambios" style="color:inherit"><div class="ico" style="width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:var(--glass2)">${icon('alert')}</div><div style="flex:1"><b>Temario 2026 publicado</b><div class="small muted">Casi todo son erratas; cambian sobre todo las fichas de aeronaves (tema 2) y la flecha del ala (tema 9).</div></div>${icon('chevR', 'chev')}</a>` : ''}
+  <div class="upd">${icon('check')} Temario y tests actualizados al temario 2026</div>
   <h2>Tu progreso por tema</h2>
   <div class="topics">${prio.map(t => { const s = topicStats(t.id); return `<a class="topic" href="#/cuestionarios/${t.id}" style="--tc:${t.c}33"><div class="n">TEMA ${t.n}</div><div class="nm">${t.name}${t.w >= 3 ? '<span class="pill cyan">prioritario</span>' : ''}</div>
     <div class="bar"><i style="width:${pct(s.seen, s.scope)}%;background:${t.c}"></i></div><div class="row small muted"><span>${pct(s.seen, s.scope)}% hecho</span><span class="spacer"></span><span>${pct(s.ok, s.seen)}% acierto</span></div></a>`; }).join('')}</div>
@@ -621,7 +654,7 @@ routes['plan'] = () => {
   app(`${head('Seguimiento', 'Mi plan', 'Tu plan personalizado. Lo que no haces se recoloca en los días siguientes y lo que adelantas te libera días. Toca un día para ver sus tareas.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
   <div class="grid g4" style="margin-top:14px">
     <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
-    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">${st.left} tareas de temario</div></div>
+    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">a ${Pace.page()} min/página ${Pace.measured() ? '(tu ritmo)' : '(estimado)'}</div></div>
     <div class="kpi"><div class="tiny">Días de estudio</div><div class="v">${st.daysLeft}</div><div class="s">hasta el repaso final</div></div>
     <div class="kpi"><div class="tiny">Ritmo</div><div class="v ${st.ok ? 'c-ok' : 'c-ko'}">${st.ok ? 'Vas bien' : 'Vas justo'}</div><div class="s">${st.ok ? `terminas el temario el ${fmtDate(st.finish)}` : `necesitas ${st.hoursLeft} h y tienes ${st.capHours} h`}</div></div></div>
   ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}
@@ -662,7 +695,7 @@ routes['bienvenida'] = (args, q) => {
     () => `<div class="eyebrow">1 de 5 · Fecha</div><h1>¿Cuándo es tu examen?</h1><p class="muted">La prueba de conocimientos de la Fase I.</p>
       <div class="chips">${chip('known', 1, 'Sé la fecha')}${chip('known', 0, 'Aún no la sé')}</div>
       ${c.known == 0 ? `<label>¿Cuántas semanas quieres prepararte?</label><div class="chips">${[4, 6, 8, 10, 12, 16, 20, 26].map(w => chip('weeks', w, w + ' semanas')).join('')}</div>` : `<label>Fecha del examen</label><input type="date" id="wexd" value="${esc(c.examDate)}" min="${ymd()}">`}`,
-    () => `<div class="eyebrow">2 de 5 · Tiempo</div><h1>¿Cuánto tiempo tienes cada día?</h1><p class="muted">Sé realista: es mejor cumplir un plan corto que abandonar uno largo.</p>
+    () => `<div class="eyebrow">2 de 5 · Tiempo</div><h1>¿Cuánto tiempo tienes cada día?</h1><p class="muted">Como referencia: <b>2 páginas del resumen con sus preguntas ≈ 1 hora</b>. Después medimos lo que tardas tú y el plan se ajusta solo a tu ritmo.</p>
       <label>De lunes a viernes</label><div class="chips">${[30, 60, 90, 120, 180, 240, 300, 360].map(m => chip('minWeek', m, hm(m))).join('')}</div>
       <label>Sábados y domingos</label><div class="chips">${[0, 60, 120, 180, 240, 300, 360].map(m => chip('minWeekend', m, hm(m))).join('')}</div>`,
     () => `<div class="eyebrow">3 de 5 · Descanso</div><h1>Tus días libres</h1><p class="muted">Esos días no te pondremos temario.</p>
@@ -674,9 +707,9 @@ routes['bienvenida'] = (args, q) => {
       <label>Orden de los temas</label><div class="chips">${chip('priority', 'recomendada', 'Recomendado: más Meteo, Navegación y FFHH')}${chip('priority', 'examen', 'Según lo que más cae en el examen')}${chip('priority', 'orden', 'En orden, del tema 1 al 9')}</div>
       <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="went" ${c.entorno ? 'checked' : ''}><i></i></span> Incluir el tema 7 (Entorno profesional)</label>`,
     () => { const st = preview(); return `<div class="eyebrow">5 de 5 · Tu plan</div><h1>${has('ingles') || has('psico') ? 'Práctica diaria y resumen' : 'Tu plan está listo'}</h1>
-      ${has('ingles') ? `<label>Inglés cada día de estudio</label><div class="chips">${[0, 10, 15, 20, 30, 45].map(m => chip('eng', m, m ? m + ' min' : 'No')).join('')}</div>` : ''}
-      ${has('psico') ? `<label>Psicotécnicos cada día de estudio</label><div class="chips">${[0, 10, 15, 20, 30, 45].map(m => chip('psico', m, m ? m + ' min' : 'No')).join('')}</div>` : ''}
-      <div class="sumbox"><div><b>${st.total}</b><span>tareas de temario</span></div><div><b>${st.hoursLeft} h</b><span>de estudio</span></div><div><b>${st.daysLeft}</b><span>días de estudio</span></div><div><b>${fmtDate(st.exam)}</b><span>examen</span></div></div>
+      ${has('ingles') ? `<label>Inglés cada día de estudio</label><div class="chips">${[10, 15, 20, 30, 45].map(m => chip('eng', m, m + ' min')).join('')}</div>` : ''}
+      ${has('psico') ? `<label>Psicotécnicos cada día de estudio</label><div class="chips">${[10, 15, 20, 30, 45].map(m => chip('psico', m, m + ' min')).join('')}</div>` : ''}
+      <p class="small muted" style="margin-top:14px">Calculado con ${Pace.page()} min por página${Pace.measured() ? ' (tu ritmo real)' : ' (2 páginas ≈ 1 h)'} más el tiempo de sus preguntas.</p><div class="sumbox"><div><b>${st.total}</b><span>tareas de temario</span></div><div><b>${st.hoursLeft} h</b><span>de estudio</span></div><div><b>${st.daysLeft}</b><span>días de estudio</span></div><div><b>${fmtDate(st.exam)}</b><span>examen</span></div></div>
       ${st.ok ? `<p class="okmsg">${icon('check')} Con tu tiempo terminas el temario el <b>${fmtDate(st.finish, { day: 'numeric', month: 'long' })}</b> y te quedan días para el repaso final.</p>` : `<div class="warnbox">${icon('alert')}<div>No te da tiempo a todo: necesitas unas ${st.hoursLeft} h y tienes ${st.capHours} h. Puedes crear el plan igualmente (los días irán más cargados) o volver atrás y ajustar.</div></div>`}`; },
   ];
   if (c.known == null) c.known = c.examDate ? 1 : 0;
@@ -721,16 +754,15 @@ routes['resumenes'] = (args, q) => {
   const a = +p, b = Math.max(a, +(q.to || p)); const pages = v.pages.filter(pg => pg.p >= a && pg.p <= b);
   const last = v.pages[v.pages.length - 1].p; const nq = qForPages(t, a, b);
   const allRead = pages.every(pg => S.rd[t + ':' + pg.p]?.v);
+  if (!allRead && (!READ || READ.key !== t + a + '-' + b)) READ = { key: t + a + '-' + b, from: now(), acc: 0 };
   app(`<div class="qtop"><a class="btn ghost sm" href="${q.task ? '#/hoy' : '#/resumenes/' + t}">${icon('chevL')}</a><span class="small muted" style="flex:1">${esc(x.name)} · ${v.bysec ? 'sección' : 'pág.'} ${a}${b !== a ? '–' + b : ''} de ${last}</span>${v.exact ? '' : '<span class="pill">aprox.</span>'}</div>
-  ${pages.map(pg => `<div class="card"><div class="pagehead"><span class="pill" style="color:${x.c}">${v.bysec ? 'Sección' : 'Página'} ${pg.p}</span>${S.rd[t + ':' + pg.p]?.v ? `<span class="pill ok">${icon('check')} estudiada</span>` : ''}<span class="spacer"></span>${pg.img ? `<button class="btn ghost sm" data-img="${pg.p}">${icon('image')} Foto original</button>` : ''}</div>
-    ${pg.img ? `<img class="photo hidden" id="img${pg.p}" loading="lazy" src="${pg.img}" alt="Foto de la página ${pg.p}">` : ''}
+  ${pages.map(pg => `<div class="card"><div class="pagehead"><span class="pill" style="color:${x.c}">${v.bysec ? 'Sección' : 'Página'} ${pg.p}</span>${S.rd[t + ':' + pg.p]?.v ? `<span class="pill ok">${icon('check')} estudiada</span>` : ''}<span class="spacer"></span></div>
     <div class="prose">${pg.h}</div></div>`).join('')}
   <div class="card flat row">${nq.length ? `<span class="small muted">${nq.length} preguntas del cuestionario salen de ${b !== a ? 'estas páginas' : 'esta página'}</span>` : ''}<span class="spacer"></span>
     ${nq.length ? `<button class="btn sec sm" id="prac">${icon('play')} Practicarlas</button>` : ''}<button class="btn sm" id="markRead" ${allRead && !q.task ? 'disabled' : ''}>${icon('check')} ${allRead ? 'Estudiado' : 'Marcar como estudiado'}</button></div>
   <div class="row" style="justify-content:space-between;margin-top:8px">${a > 1 ? `<a class="btn ghost" href="#/resumenes/${t}/${a - 1}">${icon('chevL')} Anterior</a>` : '<span></span>'}${b < last ? `<a class="btn ghost" href="#/resumenes/${t}/${b + 1}">Siguiente ${icon('chevR')}</a>` : ''}</div>`);
-  $$('[data-img]').forEach(bt => bt.onclick = () => $('#img' + bt.dataset.img).classList.toggle('hidden'));
   const pr = $('#prac'); if (pr) pr.onclick = () => startQuiz({ title: `${x.short} · págs. ${a}–${b}`, list: nq, studyTopic: t, back: location.hash });
-  $('#markRead').onclick = () => { const ids = markRead(t, a, b); if (q.task) P.setDone(q.task, true); toast(ids.length ? `Hecho · ${ids.length} preguntas al repaso 1·3·7` : 'Marcado como estudiado'); if (q.task) location.hash = '#/hoy'; else render(); };
+  $('#markRead').onclick = () => { if (READ && READ.key === t + a + '-' + b) { Pace.addRead(b - a + 1, readActive() / 60000); READ = null; } const ids = markRead(t, a, b); if (q.task) P.setDone(q.task, true); toast(ids.length ? `Hecho · ${ids.length} preguntas al repaso 1·3·7` : 'Marcado como estudiado'); if (q.task) location.hash = '#/hoy'; else render(); };
 };
 
 /* ---------- Memorizar ---------- */
@@ -790,9 +822,7 @@ routes['temario'] = (args) => {
   if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.hlblock').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.style.borderColor = 'var(--cyan)'; el.style.boxShadow = '0 0 0 3px rgba(34,211,238,.18)'; } }, 60);
 };
 
-/* ---------- Cambios del temario 2026 ---------- */
-routes['cambios'] = () => app(`${head('Estudiar', 'Cambios en el temario 2026', 'Publicados el 23 de noviembre de 2026. Ya están marcados con 🆕 en tus resúmenes y en las preguntas afectadas.')}
-  <div class="card"><div class="prose">${R.cambios || ''}</div></div>`);
+
 
 /* ---------- Hubs móviles ---------- */
 const hub = (title, items) => app(`${head('', title)}<div class="card list">${items.map(([r, ic, t, d]) => `<a href="#/${r}"><div class="ico">${icon(ic)}</div><div style="flex:1"><div class="t">${t}</div><div class="d">${d}</div></div>${icon('chevR', 'chev')}</a>`).join('')}</div>`);
@@ -809,11 +839,6 @@ routes['mas'] = () => {
     ['resumenes', 'book', 'Resúmenes', 'Tus apuntes dentro de la app'],
     ['memorizar', 'brain', 'Memorizar', 'Datos clave en modo huecos y tarjetas'],
     ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
-    ['plan', 'grid', 'Mi plan', 'Calendario de tu plan: hecho y pendiente'],
-    ['cambios', 'alert', 'Cambios temario 2026', 'Lo que cambia en los temas nuevos'],
-    ['planning', 'cal', 'Planning', 'Fecha de examen y lo estudiado'],
-    ['stats', 'chart', 'Estadísticas', 'Tu progreso y qué cae en el examen'],
-    ['ajustes', 'gear', 'Ajustes y cuenta', 'Prioridades, examen y sesión'],
   ]);
 };
 
@@ -1177,7 +1202,7 @@ function accountCard() {
     <button class="btn ghost sm" id="syncNow">${icon('refresh')} Sincronizar</button><button class="btn ghost sm" id="out">${icon('logout')} Salir</button></div>
     <div class="planbox"><div><div class="tiny">Tu plan</div><div style="font-weight:700;margin-top:2px">${esc(planLine)}</div></div><span class="spacer"></span>
     ${active && pl.cust ? `<button class="btn sec sm" id="portal">${icon('gear')} Gestionar o cancelar suscripción</button>` : ''}
-    ${!has('psico') ? `<a class="btn sm" href="#/mejorar">${icon('star')} Mejorar plan</a>` : ''}</div>
+    ${!has('psico') && ME.config?.payments ? `<a class="btn sm" href="#/mejorar">${icon('star')} Mejorar plan</a>` : ''}</div>
     ${ME.google ? '' : `<details style="margin-top:12px"><summary class="small muted" style="cursor:pointer">Cambiar contraseña</summary><div class="grid" style="margin-top:6px"><div><label>Actual</label><input type="password" id="op"></div><div><label>Nueva</label><input type="password" id="np"></div></div><button class="btn sm" id="chp" style="margin-top:10px">Cambiar</button></details>`}</div>`;
 }
 routes['cuenta'] = () => routes['ajustes']();
@@ -1185,15 +1210,13 @@ routes['ajustes'] = () => {
   const st = S.settings;
   app(`${head('Cuenta', 'Ajustes', '')}
   ${accountCard()}
-  <div id="invCard"></div>
   <div class="card row"><div style="flex:1"><h3>Apariencia</h3><div class="small muted">Se guarda en este dispositivo</div></div><div class="seg"><button data-th="light" class="${theme() === 'light' ? 'on' : ''}">Claro</button><button data-th="dark" class="${theme() === 'dark' ? 'on' : ''}">Oscuro</button></div></div>
   <div class="card"><h3>Prioridad de cada tema</h3><p class="small muted">Cuánto sale cada tema en «A boleo» y en el simulacro «con mis prioridades». 0 = no sale.</p>
   ${TOPICS.map(t => `<div class="row" style="flex-wrap:nowrap;margin:6px 0"><span style="min-width:120px" class="small">${t.short}</span><input type="range" min="0" max="5" step="0.5" value="${st.weights[t.id] ?? 0}" data-w="${t.id}" style="flex:1"><b class="mono" id="wv-${t.id}" style="width:30px;text-align:right">${st.weights[t.id] ?? 0}</b></div>`).join('')}
   <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="wReal">Proporción real 2023-25</button><button class="btn ghost sm" id="wDef">Prioridad recomendada</button></div></div>
   <div class="card"><h3>Examen</h3><div class="grid"><div><label>Penalización por fallo</label><select id="pen"><option value="0">Sin penalización</option><option value="0.25">−0,25</option><option value="0.33">−0,33 (oficial)</option><option value="0.5">−0,5</option></select></div><div><label>Minutos del simulacro</label><input type="number" id="mins" value="${st.simMinutes}"></div></div></div>
   <div class="card"><h3>Tus datos</h3><div class="row" style="margin-top:8px"><button class="btn ghost sm" id="exp">Exportar progreso</button><label class="btn ghost sm" style="margin:0">Importar<input type="file" id="imp" accept=".json" hidden></label><span class="spacer"></span><button class="btn ghost sm" id="rst">Borrar progreso</button><button class="btn danger sm" id="del">Eliminar cuenta</button></div>
-  <p class="small muted" style="margin-top:10px"><a href="legal.html#terminos" target="_blank">Términos</a> · <a href="legal.html#privacidad" target="_blank">Privacidad</a> · OpoATC no tiene relación con ENAIRE.</p></div>`);
-  if (ME.admin) loadInvites();
+  <p class="small muted" style="margin-top:10px"><a href="legal.html#terminos" target="_blank">Términos</a> · <a href="legal.html#privacidad" target="_blank">Privacidad</a> · Opo ATC no tiene relación con ENAIRE.</p></div>`);
   $$('[data-th]').forEach(b => b.onclick = () => { localStorage.setItem(THEME_KEY, b.dataset.th); applyTheme(true); render(); });
   $('#pen').value = String([0, 0.25, 0.33, 0.5].reduce((a, b) => Math.abs(b - st.penalty) < Math.abs(a - st.penalty) ? b : a));
   $('#syncNow').onclick = () => sync(true);
@@ -1211,16 +1234,22 @@ routes['ajustes'] = () => {
   $('#del').onclick = async () => { if (!confirm('¿Eliminar tu cuenta y todo tu progreso? Si tienes una suscripción activa se cancelará. No se puede deshacer.')) return; if (prompt('Escribe ELIMINAR para confirmar') !== 'ELIMINAR') return; try { await api('account/delete', { method: 'POST' }); localStorage.removeItem(stateKey()); logout(); } catch (e) { toast(e.message); } };
 };
 
+routes['codigos'] = () => {
+  if (!ME.admin) { location.hash = '#/'; return; }
+  app(`${head('Cuenta', 'Códigos de invitación', 'Cada código sirve para crear una sola cuenta con acceso completo. Pásaselo a quien quieras invitar.')}<div id="invCard"><div class="card empty">Cargando…</div></div>`);
+  loadInvites();
+};
 /* ---------- Mejorar plan ---------- */
 routes['mejorar'] = () => {
+  if (!ME.config?.payments) { location.hash = '#/ajustes'; return; }
   app(`${head('Cuenta', 'Mejora tu plan', 'Cambia de plan cuando quieras. Se ajusta automáticamente en tu próxima factura.')}${OPO.planCards ? OPO.planCards(ME.comp || ME.plan?.id, null) : ''}`);
   $$('[data-plan]').forEach(b => b.onclick = async () => { b.disabled = true; try { await OPO.checkout(b.dataset.plan); } catch (e) { toast(e.message); b.disabled = false; } });
 };
 const locked = (feature, title, text) => {
   const need = feature === 'ingles' ? 'ingles' : 'completo';
   app(`${head('Plan', title, '')}<div class="card hl lockcard"><div class="lockic">${icon('lock')}</div><h3>No está incluido en tu plan</h3><p class="muted">${text}</p>
-    <div class="row" style="justify-content:center"><button class="btn" id="upg">${icon('star')} Pasar a ${esc(PLAN_NAMES[need].replace('Fase I · ', ''))}</button></div></div>`);
-  $('#upg').onclick = async () => { try { await OPO.checkout(need); } catch (e) { toast(e.message); } };
+    ${ME.config?.payments ? `<div class="row" style="justify-content:center"><button class="btn" id="upg">${icon('star')} Pasar a ${esc(PLAN_NAMES[need].replace('Fase I · ', ''))}</button></div>` : '<p class="small muted">Tu código de acceso no incluye esta sección.</p>'}</div>`);
+  const ub = $('#upg'); if (ub) ub.onclick = async () => { try { await OPO.checkout(need); } catch (e) { toast(e.message); } };
 };
 
 async function loadInvites() {
