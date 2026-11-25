@@ -1,4 +1,4 @@
-/* OpoATC — app de estudio para la Fase I de controlador aéreo. Vanilla JS, sin dependencias. */
+/* Opo ATC — app de estudio para la oposición a controlador aéreo (fases I, II y III). Vanilla JS, sin dependencias. */
 (function () {
 'use strict';
 const D = window.DATA, R = window.RES || { res: {}, qpage: {}, mem: [], docFails: [] };
@@ -413,7 +413,7 @@ function shell() {
   const nm = SESS.name || SESS.user || 'Invitado';
   $('#root').innerHTML = `<div class="shell">
     <aside class="side">
-      <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC<div class="tiny" style="letter-spacing:.08em">Fase I · Controlador</div></span></div>
+      <div class="logo"><span class="mark">${icon('plane')}</span><span>Opo ATC<div class="tiny" style="letter-spacing:.08em">Controlador aéreo</div></span></div>
       <nav>${NAV.map(g => `<div class="tiny grp">${g.g}</div>` + g.items.map(([r, ic, t]) => `<a href="#/${r}" data-r="${r}">${icon(ic)}<span>${t}</span><span class="cnt" data-cnt="${r}"></span></a>`).join('')).join('')}</nav>
       <div class="me pmenu-wrap" id="pmSide" role="button" tabindex="0" aria-haspopup="menu"><div class="avatar">${esc(initials(nm))}</div><div style="flex:1;min-width:0"><div style="font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nm)}</div><div class="small muted">${esc(({ teoria: 'Plan Teoría', ingles: 'Plan Teoría + Inglés', completo: 'Plan Completo' })[ME.plan?.id] || (ME.admin ? 'Administrador' : ME.comp ? 'Acceso gratuito' : SESS.user))}</div></div><span id="syncDot" class="dot" title="Sincronización"></span></div>
     </aside>
@@ -722,7 +722,7 @@ routes['bienvenida'] = (args, q) => {
     return st;
   };
   const steps = [
-    () => `<div class="eyebrow">Bienvenido a OpoATC</div><h1>Así vas a preparar la Fase I</h1><p class="muted">Te hacemos 5 preguntas rápidas y creamos tu plan día a día. Puedes cambiarlo cuando quieras.</p>
+    () => `<div class="eyebrow">Bienvenido a Opo ATC</div><h1>Así vas a preparar la oposición</h1><p class="muted">Te hacemos 5 preguntas rápidas y creamos tu plan día a día. Puedes cambiarlo cuando quieras.</p>
       <div class="how">${[['cal', 'Un plan que se recalcula solo', 'Cada día ves qué toca: páginas del resumen y, después, las preguntas de esas páginas. Si un día no llegas, lo pendiente se recoloca; si adelantas, te libera días.'],
         ['repeat', 'Repaso 1 · 3 · 7', 'Lo que estudias hoy se te vuelve a preguntar mañana, a los 3 días y a los 7, para que se quede.'],
         ['x', 'Las falladas vuelven', 'Cada pregunta que fallas vuelve a salir hasta que la aciertes dos veces seguidas.'],

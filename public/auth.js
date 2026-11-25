@@ -13,7 +13,7 @@ if (SESS && SESS.local) { SESS = null; localStorage.removeItem(SESS_KEY); }
 const PLANS = [
   { id: 'teoria', name: 'Teoría', price: '8', cents: '', tag: '', feats: ['Los 9 temas: resúmenes y temario oficial', '759 preguntas de cuestionario + exámenes oficiales', 'Plan diario personalizado y adaptativo', 'Repaso 1·3·7, falladas y simulacros −0,33'] },
   { id: 'ingles', name: 'Teoría + Inglés', price: '15', tag: '', feats: ['Todo lo de Teoría', '+950 preguntas de inglés con la regla explicada', 'Exámenes de inglés de ENAIRE 2017–2026', 'Simulacro de inglés C1 (20 preguntas)'] },
-  { id: 'completo', name: 'Teoría + Inglés + Psicotécnicos', price: '19', tag: 'Recomendado', feats: ['Todo lo de Teoría + Inglés', 'Psicotécnicos: series, cálculo, atención y memoria', 'Ejercicios infinitos y cronometrados', 'La preparación completa de la Fase I'] },
+  { id: 'completo', name: 'Teoría + Inglés + Psicotécnicos', price: '19', tag: 'Recomendado', feats: ['Todo lo de Teoría + Inglés', 'Psicotécnicos: series, cálculo, atención y memoria', 'Ejercicios infinitos y cronometrados', 'La preparación completa de la Fase I, y después Fase II y III'] },
 ];
 const LATER = [{ id: 'fase2', name: 'Fase II', price: '20,90', feats: ['Preparación FEAST y PDEA'] }, { id: 'fase3', name: 'Fase III', price: '20,90', feats: ['Inglés oral y evaluación conductual'] }];
 const SOURCES = ['Google', 'Instagram', 'TikTok', 'YouTube', 'Un amigo o compañero', 'Academia', 'Foro / Reddit / Telegram', 'Otro'];
@@ -57,7 +57,7 @@ function frame(inner) {
   $('#root').innerHTML = `<div class="auth">
     <section class="hero">
       ${LOGO()}
-      <h1>Tu torre de control<br>para la <em>Fase I</em>.</h1>
+      <h1>Tu torre de control<br>para aprobar la <em>oposición</em>.</h1>
       <p>Un plan diario que se recalcula solo, cuestionarios por tema, exámenes de convocatorias anteriores, inglés y psicotécnicos. En el móvil y en el PC.</p>
       <div class="feats">
         <div>${icon('check')} Plan personalizado según tu tiempo</div>
@@ -174,7 +174,7 @@ function planCards(current, want) {
 }
 function viewPlans(me, q) {
   const want = q.plan || sessionStorage.getItem('wantPlan') || me.wantPlan;
-  frame(`${steps(2, ['Cuenta', 'Email', 'Plan', 'Pago'])}<h2>Elige tu plan</h2><p class="muted">Exclusivo para preparar la <b>Fase I</b>. Pago seguro con tarjeta a través de Stripe. <b>Cancela cuando quieras.</b> IVA incluido.</p>
+  frame(`${steps(2, ['Cuenta', 'Email', 'Plan', 'Pago'])}<h2>Elige tu plan</h2><p class="muted">Preparación para las <b>fases I, II y III</b>: empiezas por la Fase I y pagas solo la fase que estás preparando. Pago seguro con tarjeta a través de Stripe. <b>Cancela cuando quieras.</b> IVA incluido.</p>
     ${q.cancelado ? '<div class="warn">Has cancelado el pago. Puedes elegir un plan cuando quieras.</div>' : ''}
     ${planCards(me.plan && ['active', 'trialing', 'past_due'].includes(me.plan.status) ? me.plan.id : null, want)}
     <details class="code"><summary>¿Tienes un código de acceso?</summary><div class="row"><input id="code" placeholder="ATC-XXXX-XXXX"><button class="btn sec" id="rd">Canjear</button></div></details>
