@@ -821,11 +821,21 @@ routes['memorizar'] = (args, q) => {
   const tabs = `<div class="seg">${[['leer', 'Leer'], ['huecos', 'Huecos'], ['tarjetas', 'Tarjetas']].map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-m="${k}">${l}</button>`).join('')}</div>`;
   if (mode === 'tarjetas') {
     const tmp = document.createElement('div'); tmp.innerHTML = m.h;
-    const cards = $$('li, p', tmp).filter(el => el.querySelector('strong') && !el.querySelector('li')).map(el => el.innerHTML);
+    // Tarjetas: cada frase con datos en negrita, con su título de sección como contexto.
+    // Las líneas que son todo negrita (p. ej. «Aire seco:») son títulos, no tarjetas.
+    const cards = []; let ctx = '';
+    $$('h1, h2, h3, h4, p, li', tmp).forEach(el => {
+      if (/^H\d$/.test(el.tagName)) { ctx = el.textContent.trim(); return; }
+      if (el.querySelector('p, li') || !el.querySelector('strong')) return;
+      const txt = el.textContent.trim(); if (!txt) return;
+      const plain = Array.from(el.childNodes).filter(n => !(n.nodeType === 1 && n.tagName === 'STRONG')).map(n => n.textContent).join('');
+      if (plain.replace(/[\s:.,;()\-–]/g, '').length < 3) { ctx = txt.replace(/:\s*$/, ''); return; }
+      cards.push({ ctx, html: el.innerHTML });
+    });
     let ci = +(q.c || 0) % Math.max(1, cards.length);
     app(`<div class="qtop"><a class="btn ghost sm" href="#/memorizar">${icon('chevL')}</a><span class="small muted" style="flex:1">${esc(x.name || m.title)}</span>${tabs}</div>
       <div class="bar"><i style="width:${pct(ci + 1, cards.length)}%"></i></div><div class="small muted mono">${ci + 1}/${cards.length}</div>
-      <div class="card hl"><div class="flash prose cloze" id="fc">${cards[ci] || 'Sin tarjetas'}</div></div>
+      <div class="card hl">${cards[ci]?.ctx ? `<div class="fctx">${esc(cards[ci].ctx)}</div>` : ''}<div class="flash prose cloze" id="fc"><div>${cards[ci]?.html || 'Sin tarjetas'}</div></div></div>
       <div class="qactions"><button class="btn sec" id="rev">${icon('eye')} Mostrar</button><button class="btn block" id="nx">Siguiente ${icon('chevR')}</button></div>
       <div class="kbd">Toca cada hueco para destaparlo.</div>`);
     $$('#fc strong').forEach(s => s.onclick = () => s.classList.add('rev'));

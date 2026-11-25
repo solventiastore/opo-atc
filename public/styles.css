@@ -557,3 +557,6 @@ body.light .tref{background:#fff;border-color:rgba(15,23,42,.06);box-shadow:0 1p
 .tref li::before{content:"";position:absolute;left:2px;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--muted)}
 .tref mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
 .empty .chips .chip{font-size:13px}
+
+.fctx{text-align:center;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);margin:6px 0 -14px}
+.cloze strong:not(.rev){display:inline-block;min-width:3.2em;line-height:1.35;cursor:pointer}
