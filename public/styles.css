@@ -35,7 +35,7 @@ h1{font-size:26px;font-weight:750}h2{font-size:18px;font-weight:700;margin:26px 
 .topbar .ttl{flex:1;font-weight:700;font-size:17px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:-.02em}
 .logo .mark{width:34px;height:34px;border-radius:11px;background:var(--grad);display:grid;place-items:center;box-shadow:0 8px 24px -8px rgba(34,211,238,.6)}
-.logo .mark svg{width:19px;height:19px;color:#04121c}
+.logo .mark svg{width:19px;height:19px;color:#ffffff}
 .dot{width:9px;height:9px;border-radius:50%;background:#475569;box-shadow:0 0 0 3px rgba(71,85,105,.25)}
 .dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(52,211,153,.2)}.dot.busy{background:var(--amber);box-shadow:0 0 0 3px rgba(251,191,36,.2)}.dot.err{background:var(--ko);box-shadow:0 0 0 3px rgba(251,113,133,.2)}
 .avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:14px;background:linear-gradient(135deg,#334155,#1e293b);border:1px solid var(--line2);cursor:pointer}
