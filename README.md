@@ -6,9 +6,17 @@ App de preparación para la **Fase I** de la oposición a controlador de tránsi
 - `public/app.html` — la app (pantallas de acceso en `auth.js`, la app en `app.js`).
 - `public/legal.html` — términos, privacidad y cookies (**rellena los campos marcados**).
 - `content/` — contenido de pago. **No se publica**: solo lo sirve la función a cuentas con plan.
-- `netlify/functions/api.mjs` — API: cuentas, email, Google, Stripe, contenido y sincronización (Netlify Blobs).
+- `src/api.mjs` — servidor (cuentas, email, Google, Stripe, contenido, sincronización). Código común.
+- `functions/api/[[path]].js` + `src/d1.mjs` — publicación en **Cloudflare Pages** (datos en D1). **Es la que se usa.**
+- `netlify/functions/api.mjs` — adaptador de Netlify (ya no se usa; se mantiene por si acaso).
 
-## Variables de entorno (Netlify → Site configuration → Environment variables)
+## Cloudflare Pages (configuración)
+- Build: *Framework preset* None · *Build command* vacío · *Build output directory* `public`.
+- Settings → Bindings → **D1 database**: nombre de variable `DB` (la tabla se crea sola).
+- Settings → Runtime → Compatibility date reciente (p. ej. 2025-09-01).
+- Si al entrar o crear cuenta aparece «Error 1102» (límite de CPU del plan gratuito), añade la variable `PBKDF2_ITER` = `40000`.
+
+## Variables de entorno (Cloudflare: Settings → Variables and Secrets)
 
 | Variable | Para qué | Dónde se consigue |
 |---|---|---|
@@ -17,7 +25,7 @@ App de preparación para la **Fase I** de la oposición a controlador de tránsi
 | `RESEND_API_KEY` | Email de confirmación de cuenta | resend.com → API Keys |
 | `EMAIL_FROM` | Remitente, p. ej. `OpoATC <hola@tudominio.com>` | Dominio verificado en Resend |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | «Continuar con Google» | Google Cloud Console → Credenciales → ID de cliente OAuth (aplicación web) |
-| `ADMIN_USERS` | Usuarios administradores, separados por comas. Si no se pone, el administrador es `pablusm99` | — |
+| `ADMIN_USERS` | Emails de las cuentas administradoras, separados por comas (en Cloudflare pon aquí tu email) | — |
 | `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET` | Casilla «No soy un robot» al crear cuenta (gratis) | google.com/recaptcha/admin → reCAPTCHA v2 «Casilla No soy un robot», dominio de tu web |
 | `OPEN_SIGNUP` | Pon `1` para permitir crear cuentas sin código | — |
 | `PAYMENTS` | Pon `1` (con Stripe configurado) para activar los pagos | — |

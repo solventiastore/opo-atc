@@ -119,7 +119,7 @@ let saveT;
 function save(touchSettings) {
   if (touchSettings) S.settings.u = now();
   localStorage.setItem(stateKey(), JSON.stringify(S));
-  clearTimeout(saveT); saveT = setTimeout(sync, 2000);
+  clearTimeout(saveT); saveT = setTimeout(() => { saveT = null; sync(); }, 10000);
 }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 
@@ -168,7 +168,10 @@ async function sync(manual) {
     else if (manual) toast('No se pudo sincronizar: ' + e.message);
   } finally { syncing = false; }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && SESS) sync().then(() => { if (!busy()) render(); }); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && saveT && SESS) { clearTimeout(saveT); saveT = null; sync(); }
+  if (document.visibilityState === 'visible' && SESS) sync().then(() => { if (!busy()) render(); });
+});
 function logout() { if (OPO.logout) return OPO.logout(); localStorage.removeItem(SESS_KEY); location.reload(); }
 
 /* ---------- Lógica de estudio ---------- */
