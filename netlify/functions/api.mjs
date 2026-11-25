@@ -378,7 +378,9 @@ export default async (req) => {
     if (!f.includes("teoria")) return json({ error: "Necesitas un plan activo" }, 402);
     const c = loadContent();
     const data = { ...c.data, en: f.includes("ingles") ? c.data.en : [], words: f.includes("ingles") ? c.data.words : [] };
-    return new Response(JSON.stringify({ data, res: c.res, features: f }), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } });
+    // las falladas guardadas son personales del administrador: no se envían a nadie más
+    const res = (await isAdmin(s, u.user)) ? c.res : { ...c.res, docFails: [] };
+    return new Response(JSON.stringify({ data, res, features: f }), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } });
   }
 
   // --- Códigos de acceso gratuito (solo administradores) ---

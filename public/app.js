@@ -134,6 +134,7 @@ function mergeState(a, b) {
   }
   if (b.plan && (!a.plan || (b.plan.u || 0) > (a.plan.u || 0))) a.plan = b.plan;
   if (b.pace && (!a.pace || (b.pace.u || 0) > (a.pace.u || 0))) a.pace = b.pace;
+  if (b.cyc && (!a.cyc || (b.cyc.u || 0) > (a.cyc.u || 0))) a.cyc = b.cyc;
   if ((b.settings?.u || 0) > (a.settings.u || 0)) a.settings = Object.assign(defaultSettings(), b.settings);
   return a;
 }
@@ -223,24 +224,44 @@ function markRead(t, a, b, label) {
    Se genera a partir de tus respuestas (fecha del examen, tiempo, días libres, prioridades) y del contenido:
    resúmenes por bloques de páginas y, tras cada bloque, las preguntas del cuestionario de esas páginas.
    Cada día se fija lo que toca al abrir la app; lo pendiente se recoloca solo en los días que quedan. */
-// Ritmo: por defecto 2 páginas + sus preguntas ≈ 1 h. Se ajusta con lo que tarda cada usuario de verdad.
-const DEF_PAGE = 24, DEF_Q = 0.6;
+// Ritmo: la referencia es la plantilla (cada fila ≈ 1 h: ~8 páginas con sus preguntas).
+// Se ajusta con lo que tarda cada usuario de verdad al estudiar páginas y al responder preguntas.
+const NOM_PAGE = 6, NOM_Q = 0.5;
 const Pace = {
-  page() { const r = (S.pace?.r || []).slice(-12); const pg = r.reduce((a, x) => a + x.p, 0), m = r.reduce((a, x) => a + x.m, 0);
-    return Math.round(Math.min(90, Math.max(8, (m + DEF_PAGE * 2) / (pg + 2)))); },
-  q() { const r = (S.pace?.q || []).slice(-150); const t = r.reduce((a, x) => a + x, 0);
-    return Math.min(3, Math.max(0.25, (t / 60 + DEF_Q * 10) / (r.length + 10))); },
+  fr() { const r = (S.pace?.r || []).slice(-15); const m = r.reduce((a, x) => a + x.m, 0), e = r.reduce((a, x) => a + x.p * NOM_PAGE, 0); return Math.min(4, Math.max(0.4, (m + 60) / (e + 60))); },
+  fq() { const r = (S.pace?.q || []).slice(-200); const t = r.reduce((a, x) => a + x, 0) / 60; return Math.min(4, Math.max(0.4, (t + 10 * NOM_Q) / (r.length * NOM_Q + 10 * NOM_Q))); },
+  page: () => Math.round(NOM_PAGE * Pace.fr()),
   measured: () => (S.pace?.r || []).length >= 2,
-  addRead(pages, mins) { if (!(mins >= 2 && mins <= pages * 120)) return; S.pace = S.pace || { r: [], q: [] }; S.pace.r = (S.pace.r || []).concat([{ p: pages, m: Math.round(mins) }]).slice(-30); S.pace.u = now(); P._sig = ''; },
+  label: () => Pace.measured() ? `a tu ritmo: ${Pace.page()} min por página` : 'ritmo de referencia: ~8 páginas con sus preguntas por hora',
+  addRead(pages, mins) { if (!(mins >= 1 && mins <= pages * 120)) return; S.pace = S.pace || { r: [], q: [] }; S.pace.r = (S.pace.r || []).concat([{ p: pages, m: Math.round(mins) }]).slice(-30); S.pace.u = now(); P._sig = ''; },
   addQ(sec) { if (!(sec >= 2 && sec <= 300)) return; S.pace = S.pace || { r: [], q: [] }; S.pace.q = (S.pace.q || []).concat([Math.round(sec)]).slice(-300); S.pace.u = now(); },
+};
+// Plantilla de referencia: cada fila es 1 hora de temario (resumen [tema, desde, hasta]).
+const PLAN_TEMPLATE = [
+  [['meteo', 1, 2], ['ffhh', 1, 2], ['carto', 1, 1], ['nav', 1, 2]],
+  [['meteo', 3, 4], ['ffhh', 3, 4], ['carto', 3, 4], ['nav', 3, 3]],
+  [['meteo', 5, 6], ['ffhh', 5, 7], ['carto', 5, 5], ['nav', 4, 4]],
+  [['meteo', 7, 8], ['ffhh', 8, 10], ['carto', 6, 6], ['nav', 5, 5]],
+  [['meteo', 9, 9], ['ffhh', 11, 12], ['carto', 7, 7], ['nav', 6, 7], ['aero', 1, 4], ['fpl', 1, 2]],
+  [['meteo', 10, 10], ['ffhh', 13, 13], ['carto', 8, 8], ['nav', 8, 8], ['aero', 5, 5], ['fpl', 3, 4]],
+  [['meteo', 11, 12], ['ffhh', 14, 14], ['carto', 9, 9], ['nav', 9, 9], ['aero', 6, 6]],
+  [['meteo', 13, 13], ['ffhh', 15, 15], ['carto', 10, 10], ['nav', 10, 12], ['aero', 7, 8]],
+  [['meteo', 14, 14], ['ffhh', 16, 18], ['carto', 11, 14], ['nav', 13, 16]],
+  [['meteo', 15, 20], ['ffhh', 19, 20]],
+];
+// Repaso de temas anteriores: lo que ya pasó 1·3·7 vuelve en orden, empezando por lo primero que estudiaste
+const Ciclo = {
+  pool() { const seen = new Set(); return S.study.filter(e => e.done?.[1] && e.done?.[3] && e.done?.[7]).sort((a, b) => a.d.localeCompare(b.d) || a.id.localeCompare(b.id)).flatMap(e => e.ids).filter(id => Q[id] && !seen.has(id) && seen.add(id)); },
+  next(n = 20) { const pl = Ciclo.pool(); if (!pl.length) return []; const i = (S.cyc?.i || 0) % pl.length; const out = pl.slice(i, i + n); return out.concat(pl.slice(0, Math.max(0, Math.min(i, n - out.length)))); },
+  advance(n) { S.cyc = { i: (S.cyc?.i || 0) + n, u: now() }; save(); },
 };
 let READ = null;
 const readActive = () => READ ? READ.acc + (document.visibilityState === 'visible' ? now() - READ.from : 0) : 0;
 document.addEventListener('visibilitychange', () => { if (!READ) return; if (document.visibilityState === 'hidden') { READ.acc += now() - READ.from; } else READ.from = now(); });
 const WD = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 const dow = ds => new Date(ds + 'T12:00:00').getDay();
-const defaultCfg = () => ({ examDate: S.settings.examDate || '', weeks: 10, start: ymd(), minWeek: 120, minWeekend: 180, off: [0], restEvery: 0,
-  finalDays: 7, level: 'cero', priority: 'recomendada', entorno: false, eng: has('ingles') ? 20 : 0, psico: has('psico') ? 20 : 0 });
+const defaultCfg = () => ({ examDate: S.settings.examDate || '', weeks: 10, start: ymd(), minWeek: 60, minWeekend: 60, off: [0], restEvery: 0,
+  finalDays: 7, spare: 'repaso', entorno: false, eng: 20, psico: 20 });
 const P = {
   cfg: () => Object.assign(defaultCfg(), S.plan?.cfg || {}),
   examDate() { const c = P.cfg(); return c.examDate || addDays(c.start, c.weeks * 7); },
@@ -253,34 +274,34 @@ const P = {
     return false;
   },
   isFinal: ds => ds > P.lastStudy() && ds <= P.end(),
-  cap(ds) { const c = P.cfg(); const base = (dow(ds) === 0 || dow(ds) === 6) ? +c.minWeekend : +c.minWeek; return Math.max(20, base - (has('ingles') ? +c.eng || 20 : 0) - (has('psico') ? +c.psico || 20 : 0)); },
+  cap(ds) { const c = P.cfg(); return Math.max(15, (dow(ds) === 0 || dow(ds) === 6) ? +c.minWeekend : +c.minWeek); },
   _tasks: null, _sig: '',
   tasks() {
-    const c = P.cfg(); const MP = Pace.page(), MQ = Pace.q(); const sig = JSON.stringify([c.level, c.priority, c.entorno, S.plan?.u || 0, MP, Math.round(MQ * 20)]);
+    const c = P.cfg(); const FR = Pace.fr(), FQ = Pace.fq();
+    const sig = JSON.stringify([c.entorno, S.plan?.u || 0, Math.round(FR * 20), Math.round(FQ * 20)]);
     if (P._tasks && P._sig === sig) return P._tasks;
-    const streams = {};
-    const order = TOPICS.filter(t => t.id !== 'entorno' || c.entorno);
-    for (const t of order) {
-      const out = []; const pages = pagesOf(t.id).map(p => p.p); const used = new Set();
-      const step = c.level === 'repaso' ? 3 : 2;
-      for (let i = 0; i < pages.length; i += step) {
-        const a = pages[i], b = pages[Math.min(i + step, pages.length) - 1];
-        out.push({ key: `res:${t.id}:${a}-${b}`, k: 'res', t: t.id, a, b, mins: (b - a + 1) * MP * (c.level === 'repaso' ? 0.5 : 1) });
-        const ids = qForPages(t.id, a, b).filter(id => !used.has(id)); ids.forEach(id => used.add(id));
-        for (let j = 0; j < ids.length; j += 25) { const part = ids.slice(j, j + 25); out.push({ key: `qp:${t.id}:${a}-${b}:${j}`, k: 'qp', t: t.id, a, b, ids: part, mins: Math.ceil(part.length * MQ) + 3 }); }
-      }
-      const rest = D.q.filter(x => x.t === t.id && !used.has(x.id)).sort((x, y) => x.n - y.n);
-      for (let j = 0; j < rest.length; j += 25) { const part = rest.slice(j, j + 25); out.push({ key: `q:${t.id}:${part[0].n}-${part[part.length - 1].n}`, k: 'q', t: t.id, a: part[0].n, b: part[part.length - 1].n, ids: part.map(x => x.id), mins: Math.ceil(part.length * MQ) + 3 }); }
-      if (out.length) streams[t.id] = out;
-    }
-    let list = [];
-    if (c.priority === 'orden') list = TOPICS.slice().sort((a, b) => a.n - b.n).flatMap(t => streams[t.id] || []);
-    else {
-      const sh = c.priority === 'examen' ? realShares() : null;
-      const w = id => sh ? Math.max(0.05, sh[id] || 0.05) : ({ meteo: 3, nav: 3, ffhh: 3, carto: 2, fpl: 2 }[id] || 1);
-      const vt = {}, idx = {}; Object.keys(streams).forEach(k => { vt[k] = 0; idx[k] = 0; });
-      for (;;) { const ks = Object.keys(streams).filter(k => idx[k] < streams[k].length); if (!ks.length) break; const k = ks.sort((a, b) => vt[a] - vt[b])[0]; const tk = streams[k][idx[k]++]; vt[k] += tk.mins / w(k); list.push(tk); }
-    }
+    // 1) Filas base: plantilla de 1 h por fila (segunda vuelta del plan de referencia)
+    const rows = PLAN_TEMPLATE.map(r => r.map(([t, a, b]) => ({ t, a, b })).filter(x => pagesOf(x.t).some(p => p.p >= x.a && p.p <= x.b)));
+    const covered = {}; rows.flat().forEach(x => { for (let p = x.a; p <= x.b; p++) (covered[x.t] = covered[x.t] || new Set()).add(p); });
+    // 2) Páginas que la plantilla no cubre: mismas filas de ~8 páginas, 2-3 por tema y fila
+    const extraTopics = ['nav', 'fpl', 'meteo', 'ffhh', 'carto', 'aero', 'inst', 'oaci'].concat(c.entorno ? ['entorno'] : []);
+    const streams = extraTopics.map(t => { const ps = pagesOf(t).map(p => p.p).filter(p => !covered[t]?.has(p)); const ch = []; for (let i = 0; i < ps.length; i += 3) ch.push({ t, a: ps[i], b: ps[Math.min(i + 3, ps.length) - 1] }); return ch; }).filter(s => s.length);
+    while (streams.some(s => s.length)) { const row = []; let pg = 0; for (const s of streams) { if (!s.length || pg >= 8) continue; const x = s.shift(); row.push(x); pg += x.b - x.a + 1; } if (row.length) rows.push(row); }
+    // 3) Tareas de cada fila: resumen + preguntas de esas páginas; la fila vale 60 min
+    const used = new Set(); const list = [];
+    rows.forEach((row, ri) => {
+      const items = [];
+      row.forEach(x => items.push({ key: `res:${x.t}:${x.a}-${x.b}`, k: 'res', t: x.t, a: x.a, b: x.b, w: (x.b - x.a + 1), row: ri }));
+      row.forEach(x => { const ids = qForPages(x.t, x.a, x.b).filter(id => !used.has(id)); ids.forEach(id => used.add(id));
+        for (let j = 0; j < ids.length; j += 25) { const part = ids.slice(j, j + 25); items.push({ key: `qp:${x.t}:${x.a}-${x.b}:${j}`, k: 'qp', t: x.t, a: x.a, b: x.b, ids: part, w: part.length * 0.12, row: ri }); } });
+      const W = items.reduce((s, i) => s + i.w, 0) || 1;
+      items.forEach(i => { i.mins = Math.max(3, Math.round(60 * i.w / W * (i.k === 'res' ? FR : FQ))); list.push(i); });
+    });
+    // 4) Preguntas sin página asociada: filas de ~45 preguntas (1 h)
+    const rest = D.q.filter(x => !used.has(x.id) && (c.entorno || x.t !== 'entorno')).sort((x, y) => (TOP[x.t]?.n || 0) - (TOP[y.t]?.n || 0) || x.n - y.n);
+    const byT = {}; rest.forEach(x => (byT[x.t] = byT[x.t] || []).push(x));
+    for (const arr of Object.values(byT)) for (let j = 0; j < arr.length; j += 25) { const part = arr.slice(j, j + 25);
+      list.push({ key: `q:${part[0].t}:${part[0].n}-${part[part.length - 1].n}`, k: 'q', t: part[0].t, a: part[0].n, b: part[part.length - 1].n, ids: part.map(x => x.id), mins: Math.max(5, Math.round(part.length * 60 / 45 * FQ)) }); }
     P._tasks = list; P._sig = sig; P.byKey = Object.fromEntries(list.map(t => [t.key, t]));
     return list;
   },
@@ -305,7 +326,7 @@ const P = {
     const days = P.studyDays(from, P.lastStudy()); const out = {}; if (!list.length) return out;
     if (!days.length) { out[from] = list.map(t => t.key); return out; }
     const total = list.reduce((a, t) => a + t.mins, 0);
-    const capSum = days.reduce((a, d) => a + P.cap(d), 0); const factor = Math.max(1, total / capSum);
+    const capSum = days.reduce((a, d) => a + P.cap(d), 0); const factor = P.cfg().spare === 'repartir' ? Math.max(0.05, total / capSum) : Math.max(1, total / capSum);
     let i = 0;
     for (let di = 0; di < days.length && i < list.length; di++) {
       const d = days[di]; const target = di === days.length - 1 ? Infinity : P.cap(d) * factor; let sum = 0; out[d] = [];
@@ -316,14 +337,20 @@ const P = {
   today() {
     const t = ymd(); S.ps = S.ps || {};
     if (!S.ps[t] || !Array.isArray(S.ps[t].k)) {
-      const pend = P.tasks().filter(x => !P.done(x.key));
+      const late = P.overdue(); const pend = P.tasks().filter(x => !P.done(x.key) && !late.includes(x.key));
       S.ps[t] = { k: P.isOff(t) || P.isFinal(t) ? [] : (P.spread(pend, t)[t] || []), u: now() }; if (!P._preview) save();
     }
     return S.ps[t].k.filter(k => P.get(k));
   },
+  // lo que tocaba en días anteriores y sigue sin hacer
+  overdue() {
+    const t = ymd(), start = P.cfg().start || t; const out = [];
+    Object.keys(S.ps || {}).filter(d => d < t && d >= start).sort().forEach(d => (S.ps[d].k || []).forEach(k => { if (P.byKey?.[k] || P.get(k)) if (!P.done(k) && !out.includes(k)) out.push(k); }));
+    const today = S.ps?.[t]?.k || []; return out.filter(k => !today.includes(k) && !/^d:/.test(k));
+  },
   schedule() {
     const t = ymd(); const todayK = P.today();
-    const rest = P.tasks().filter(x => !P.done(x.key) && !todayK.includes(x.key));
+    const late = P.overdue(); const rest = P.tasks().filter(x => !P.done(x.key) && !todayK.includes(x.key) && !late.includes(x.key));
     const sch = P.spread(rest, addDays(t, 1)); sch[t] = todayK; return sch;
   },
   adelantar() {
@@ -333,7 +360,7 @@ const P = {
   // tareas diarias que no van en el temario (inglés, psicotécnicos, repaso final)
   recurring(key) {
     const m = /^d:(\d{4}-\d{2}-\d{2}):(\w+)$/.exec(key || ''); if (!m) return null; const c = P.cfg();
-    const mins = { eng: +c.eng || 20, psico: +c.psico || 20, sim: 70, fall: 40 }[m[2]]; if (mins == null) return null;
+    const mins = { eng: 20, psico: 20, sim: 70, fall: 40, ciclo: 15 }[m[2]]; if (mins == null) return null;
     return { key, d: m[1], k: m[2], t: m[2], mins };
   },
   dailyFor(ds) {
@@ -341,6 +368,7 @@ const P = {
     if (P.isFinal(ds)) { out.push(`d:${ds}:sim`, `d:${ds}:fall`); }
     if (has('ingles')) out.push(`d:${ds}:eng`);
     if (has('psico')) out.push(`d:${ds}:psico`);
+    if (ds >= ymd() && Ciclo.pool().length) out.push(`d:${ds}:ciclo`);
     return out;
   },
   itemsFor(ds) {
@@ -349,23 +377,25 @@ const P = {
     else keys = P.schedule()[ds] || [];
     keys = keys.filter(k => P.get(k));
     if (ds <= t) P.tasks().forEach(x => { if (!keys.includes(x.key) && P.doneOn(x.key) === ds) keys.push(x.key); });
-    return [...keys, ...P.dailyFor(ds)].map(k => P.get(k));
+    const late = ds === t ? P.overdue().filter(k => !keys.includes(k)) : [];
+    return [...late.map(k => Object.assign({}, P.get(k), { late: true })), ...keys.map(k => P.get(k)), ...P.dailyFor(ds).map(k => P.get(k))];
   },
   stats() {
     const all = P.tasks(); const done = all.filter(x => P.done(x.key)); const pend = all.filter(x => !P.done(x.key));
     const t = ymd(); const days = P.studyDays(t, P.lastStudy()); const mins = pend.reduce((a, x) => a + x.mins, 0); const cap = days.reduce((a, d) => a + P.cap(d), 0);
     const finish = (() => { const sch = P.schedule(); return Object.keys(sch).filter(d => sch[d].length).sort().pop() || t; })();
-    return { total: all.length, done: done.length, left: pend.length, daysLeft: days.length, hoursLeft: Math.round(mins / 60), capHours: Math.round(cap / 60), ok: mins <= cap, finish };
+    const spare = mins <= cap ? P.studyDays(addDays(finish, 1), P.lastStudy()).length : 0;
+    return { total: all.length, done: done.length, left: pend.length, daysLeft: days.length, hoursLeft: Math.round(mins / 60), capHours: Math.round(cap / 60), ok: mins <= cap, finish, spare };
   },
 };
-const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'qp' ? `${it.ids.length} preg. (p. ${it.a}${it.b !== it.a ? '–' + it.b : ''})` : it.k === 'q' ? `nº ${it.a}–${it.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', sim: 'Simulacro', fall: 'Falladas' }[it.k] || '');
+const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'qp' ? `${it.ids.length} preg. (p. ${it.a}${it.b !== it.a ? '–' + it.b : ''})` : it.k === 'q' ? `nº ${it.a}–${it.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', sim: 'Simulacro', fall: 'Falladas', ciclo: 'Repaso de temas anteriores' }[it.k] || '');
 
 /* ---------- Shell / navegación ---------- */
 const NAV = [
-  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Resúmenes'], ['memorizar', 'brain', 'Memorizar'], ['temario', 'marker', 'Temario oficial']] },
-  { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['ingles', 'globe', 'Inglés'], ['psicotecnicos', 'brain', 'Psicotécnicos']] },
+  { g: 'Estudiar', items: [['', 'home', 'Inicio'], ['hoy', 'sun', 'Hoy toca'], ['resumenes', 'book', 'Estudiar'], ['memorizar', 'brain', 'Memorizar'], ['ingles', 'globe', 'Inglés'], ['psicotecnicos', 'brain', 'Psicotécnicos']] },
+  { g: 'Practicar', items: [['aleatorio', 'shuffle', 'Preguntas a boleo'], ['cuestionarios', 'layers', 'Cuestionarios'], ['repaso', 'repeat', 'Repaso 1·3·7'], ['falladas', 'x', 'Falladas'], ['examenes', 'exam', 'Exámenes y simulacros'], ['temario', 'marker', 'Temario oficial']] },
 ];
-const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); Object.assign(TITLES, { practicar: 'Practicar', mas: 'Más', plan: 'Mi plan', planning: 'Planning', stats: 'Estadísticas', ajustes: 'Ajustes', cuenta: 'Ajustes', codigos: 'Códigos de invitación', bienvenida: 'Tu plan', psicotecnicos: 'Psicotécnicos' });
+const TITLES = Object.fromEntries(NAV.flatMap(g => g.items.map(([r, , t]) => [r, t]))); Object.assign(TITLES, { resumenes: 'Estudiar', practicar: 'Practicar', mas: 'Más', plan: 'Mi plan', planning: 'Planning', stats: 'Estadísticas', ajustes: 'Ajustes', cuenta: 'Ajustes', codigos: 'Códigos de invitación', bienvenida: 'Tu plan', psicotecnicos: 'Psicotécnicos' });
 const THEME_KEY = 'opo_theme';
 const theme = () => localStorage.getItem(THEME_KEY) || 'light';
 function applyTheme(inApp) {
@@ -421,7 +451,7 @@ function profileMenu(anchor) {
 }
 function updateChrome(r) {
   $$('.side nav a').forEach(a => a.classList.toggle('on', a.dataset.r === r));
-  const tabMap = { '': '', hoy: 'hoy', plan: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', ingles: 'practicar', psicotecnicos: 'practicar', practicar: 'practicar' };
+  const tabMap = { '': '', hoy: 'hoy', plan: 'hoy', falladas: 'falladas', aleatorio: 'practicar', cuestionarios: 'practicar', repaso: 'practicar', examenes: 'practicar', temario: 'practicar', practicar: 'practicar' };
   const tr = r in tabMap ? tabMap[r] : 'mas';
   $$('.tabbar a').forEach(a => a.classList.toggle('on', a.dataset.t === tr));
   $('#ttl').textContent = TITLES[r] ?? '';
@@ -519,7 +549,7 @@ function renderQuiz(anim) {
       <div class="qtext">${esc(q.q)}</div>
       ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
       ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + ': ' + esc(q.o[q.a])}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
-        ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en tu resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
+        ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en el resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
     </div>
     <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>
     <div class="kbd">Teclado: 1-9 o A-D para responder · Enter para seguir</div>`);
@@ -582,22 +612,23 @@ routes[''] = () => {
 };
 
 /* ---------- Hoy toca ---------- */
-const tbadge = tp => { const x = TOP[tp]; const ic = { psico: 'brain', eng: 'globe', sim: 'exam', fall: 'x' }[tp]; return `<span class="tbadge" style="--tc:${x?.c || '#009FDA'}" title="${esc(tname(tp))}">${x ? 'T' + x.n : icon(ic || 'star')}</span>`; };
+const tbadge = tp => { const x = TOP[tp]; const ic = { psico: 'brain', eng: 'globe', sim: 'exam', fall: 'x', ciclo: 'repeat' }[tp]; return `<span class="tbadge" style="--tc:${x?.c || '#009FDA'}" title="${esc(tname(tp))}">${x ? 'T' + x.n : icon(ic || 'star')}</span>`; };
 function taskCard(it, day) {
   const d = P.done(it.key), on = P.doneOn(it.key); const isPast = day < ymd();
   let title, desc, actions = '';
   if (it.k === 'res') {
     const nq = qForPages(it.t, it.a, it.b).length;
-    title = `${tname(it.t)} · resumen págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}`;
+    title = `${tname(it.t)} · resumen ${it.b !== it.a ? `págs. ${it.a}–${it.b}` : `pág. ${it.a}`}`;
     desc = `${Math.round(it.mins)} min aprox.${nq ? ` · luego ${nq} preguntas de estas páginas` : ''}`;
     actions = `<a class="btn sm" href="#/resumenes/${it.t}/${it.a}?to=${it.b}&task=${encodeURIComponent(it.key)}">${icon('book')} Leer</a>`;
   } else if (it.k === 'qp' || it.k === 'q') {
-    title = it.k === 'qp' ? `${tname(it.t)} · preguntas de las págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : `${tname(it.t)} · cuestionario nº ${it.a}–${it.b}`;
+    title = it.k === 'qp' ? `${tname(it.t)} · preguntas de ${it.b !== it.a ? `las págs. ${it.a}–${it.b}` : `la pág. ${it.a}`}` : `${tname(it.t)} · cuestionario nº ${it.a}–${it.b}`;
     desc = `${it.ids.length} preguntas · ${it.mins} min aprox. · entran en tu repaso 1·3·7`;
     actions = `<button class="btn sm" data-q="${it.key}">${icon('play')} Hacer</button>`;
   } else if (it.k === 'eng') { title = 'Inglés'; desc = `${it.mins} min · preguntas tipo examen con la regla explicada`; actions = `<a class="btn sm" href="#/ingles">${icon('globe')} Practicar</a>`; }
   else if (it.k === 'psico') { title = 'Psicotécnicos'; desc = `${it.mins} min · series, cálculo, atención y memoria`; actions = `<a class="btn sm" href="#/psicotecnicos">${icon('brain')} Practicar</a>`; }
   else if (it.k === 'sim') { title = 'Simulacro de examen'; desc = '50 preguntas · 50 min · −0,33 por fallo'; actions = `<a class="btn sm" href="#/examenes">${icon('exam')} Hacer simulacro</a>`; }
+  else if (it.k === 'ciclo') { title = 'Repaso de temas anteriores'; desc = '20 preguntas de lo que ya pasó el repaso 1·3·7, en orden desde lo primero que estudiaste'; actions = `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Hacer repaso</button>`; }
   else if (it.k === 'fall') { title = 'Falladas y repasos pendientes'; desc = `${pendingFails().length} falladas · ${dueReviews().length} repasos 1·3·7`; actions = `<a class="btn sm" href="#/falladas">${icon('x')} Repasar</a>`; }
   const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast && !it.d ? '<span class="pill amber">recolocado</span>' : '');
   return `<div class="task ${d ? 'done' : ''}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>${tbadge(it.t)}
@@ -613,6 +644,7 @@ function bindTasks(items, back) {
   });
   $$('[data-q]').forEach(b => b.onclick = () => {
     const it = items.find(i => i.key === b.dataset.q);
+    if (it.k === 'ciclo') { const ids = Ciclo.next(); if (!ids.length) return toast('Aún no hay temas que hayan pasado el repaso 1·3·7'); return startQuiz({ title: 'Repaso de temas anteriores', list: ids, back, onFinish: z => { Ciclo.advance(Math.min(z.i, ids.length)); if (z.i >= ids.length) P.setDone(it.key, true); } }); }
     startQuiz({ title: `${tname(it.t)} · ${itemLabel(it)}`, list: it.ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
   });
 }
@@ -627,7 +659,8 @@ routes['hoy'] = (args, q) => {
   app(`${head(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' }) + (isToday ? ' · hoy' : ''), isToday ? 'Hoy toca' : isPast ? 'Lo que tocaba' : 'Lo que toca', isToday ? 'Tu plan se recalcula solo: lo que no hagas pasa a los días siguientes y lo que adelantes te libera días.' : isPast ? 'Lo que no hiciste ese día ya está recolocado en los siguientes.' : 'Puedes adelantar estas tareas: márcalas al hacerlas y el plan se recalcula.', nav)}
   <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${off ? 'Día libre: descansa 😌' : day >= P.examDate() ? 'Día del examen ✈ ¡Mucha suerte!' : items.length ? `${items.length} tareas${mins ? ` · ~${mins >= 60 ? (Math.round(mins / 6) / 10).toString().replace('.', ',') + ' h' : Math.round(mins) + ' min'} pendientes` : ' · ¡todo hecho!'}` : 'Sin temario nuevo: repasos y falladas'}${fin && !off ? ' · <span class="pill cyan">repaso final</span>' : ''}</div>
     <div class="small muted">Quedan ${st.left} tareas de temario · examen el ${fmtDate(P.examDate(), { day: 'numeric', month: 'long' })}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
-  ${items.map(it => taskCard(it, day)).join('') || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
+  ${items.some(i => i.late) ? `<h2 class="sub">${icon('alert')} Acumulado para ponerte al día <span class="pill amber">${items.filter(i => i.late && !P.done(i.key)).length}</span></h2><p class="small muted" style="margin:-6px 0 8px">Lo que tocaba en días anteriores y aún no has hecho. Hazlo primero y vuelves a ir al día.</p>${items.filter(i => i.late).map(it => taskCard(it, day)).join('')}<h2 class="sub">${icon('sun')} Lo de hoy</h2>` : ''}
+  ${items.filter(i => !i.late).map(it => taskCard(it, day)).join('') || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
   ${isToday && nextN && !off ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo siguiente?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
   <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a></div>`);
   $$('[data-f]').forEach(b => b.onclick = () => { location.hash = '#/hoy?f=' + b.dataset.f; });
@@ -649,24 +682,25 @@ routes['plan'] = () => {
     return `<a class="hs ${c2}" href="#/hoy?f=${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></a>`; }).join('');
   const rows = dates.map(d => { if (d === end) return ''; const its = itemsFor(d); if (!its.length && d < t) return '';
     if (P.isOff(d)) return `<tr class="orow"><th>${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">Día libre</td></tr>`;
-    const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' p' : i.a + '–' + i.b) : itemLabel(i))}</span>`).join('')}</td>`; }).join('');
+    const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall', 'ciclo'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' preg.' : 'nº ' + i.a + '–' + i.b) : k === 'x' ? itemLabel(i).replace('Repaso de temas anteriores', 'Repaso') : 'págs. ' + i.a + (i.b !== i.a ? '–' + i.b : ''))}</span>`).join('')}</td>`; }).join('');
     return `<tr class="${d === t ? 'trow' : ''}"><th><a href="#/hoy?f=${d}">${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</a></th>${cells}</tr>`; }).join('');
-  app(`${head('Seguimiento', 'Mi plan', 'Tu plan personalizado. Lo que no haces se recoloca en los días siguientes y lo que adelantas te libera días. Toca un día para ver sus tareas.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
+  app(`${head('Seguimiento', 'Mi plan', 'Tu plan día a día: qué páginas estudiar y qué preguntas hacer cada día. Lo que no haces se recoloca y lo que adelantas te libera días.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
   <div class="grid g4" style="margin-top:14px">
     <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
-    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">a ${Pace.page()} min/página ${Pace.measured() ? '(tu ritmo)' : '(estimado)'}</div></div>
+    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">${Pace.label()}</div></div>
     <div class="kpi"><div class="tiny">Días de estudio</div><div class="v">${st.daysLeft}</div><div class="s">hasta el repaso final</div></div>
     <div class="kpi"><div class="tiny">Ritmo</div><div class="v ${st.ok ? 'c-ok' : 'c-ko'}">${st.ok ? 'Vas bien' : 'Vas justo'}</div><div class="s">${st.ok ? `terminas el temario el ${fmtDate(st.finish)}` : `necesitas ${st.hoursLeft} h y tienes ${st.capHours} h`}</div></div></div>
+  ${st.ok && st.spare ? `<p class="okmsg">${icon('check')}<span>Te sobran <b>${st.spare} días</b> antes del repaso final: ${c.spare === 'repartir' ? 'puedes ir más desahogado o' : 'los dedicamos a repasar (repaso de temas anteriores, falladas y simulacros). Si prefieres'} <a href="#/bienvenida?edit=1">${c.spare === 'repartir' ? 'terminar antes' : 'repartir el temario en más días'}</a>.</span></p>` : ''}
   ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}
   <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
-  <h2>Calendario</h2>
-  <div class="card"><div class="hstrip">${strip}</div>
-    <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span><span><i class="lg final"></i>repaso final</span><span><i class="lg off"></i>libre</span><span><i class="lg exam"></i>examen</span></div></div>
   <h2>Día a día</h2>
   <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="8" class="grp">Resúmenes (páginas)</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th><th rowspan="2">Diario</th></tr>
     <tr>${PLAN_COLS.filter(c2 => c2[0] !== 'x').map(c2 => `<th>${c2[2]}</th>`).join('')}</tr></thead>
     <tbody>${rows}<tr class="erow"><th>${fmtDate(end, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">EXAMEN ✈</td></tr></tbody></table></div>
-  <div class="small muted" style="margin-top:8px"><span class="pc c-done">verde</span> hecho · <span class="pc c-today">azul</span> hoy · <span class="pc c-fut">gris</span> pendiente · <span class="pc c-miss">ámbar</span> no hecho ese día (ya recolocado)</div>`);
+  <div class="small muted" style="margin-top:8px"><span class="pc c-done">verde</span> hecho · <span class="pc c-today">azul</span> hoy · <span class="pc c-fut">gris</span> pendiente · <span class="pc c-miss">ámbar</span> no hecho ese día (ya recolocado)</div>
+  <h2>Calendario</h2>
+  <div class="card"><div class="hstrip">${strip}</div>
+    <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span><span><i class="lg final"></i>repaso final</span><span><i class="lg off"></i>libre</span><span><i class="lg exam"></i>examen</span></div></div>`);
 };
 
 /* ---------- Bienvenida y configuración del plan ---------- */
@@ -695,22 +729,20 @@ routes['bienvenida'] = (args, q) => {
     () => `<div class="eyebrow">1 de 5 · Fecha</div><h1>¿Cuándo es tu examen?</h1><p class="muted">La prueba de conocimientos de la Fase I.</p>
       <div class="chips">${chip('known', 1, 'Sé la fecha')}${chip('known', 0, 'Aún no la sé')}</div>
       ${c.known == 0 ? `<label>¿Cuántas semanas quieres prepararte?</label><div class="chips">${[4, 6, 8, 10, 12, 16, 20, 26].map(w => chip('weeks', w, w + ' semanas')).join('')}</div>` : `<label>Fecha del examen</label><input type="date" id="wexd" value="${esc(c.examDate)}" min="${ymd()}">`}`,
-    () => `<div class="eyebrow">2 de 5 · Tiempo</div><h1>¿Cuánto tiempo tienes cada día?</h1><p class="muted">Como referencia: <b>2 páginas del resumen con sus preguntas ≈ 1 hora</b>. Después medimos lo que tardas tú y el plan se ajusta solo a tu ritmo.</p>
-      <label>De lunes a viernes</label><div class="chips">${[30, 60, 90, 120, 180, 240, 300, 360].map(m => chip('minWeek', m, hm(m))).join('')}</div>
-      <label>Sábados y domingos</label><div class="chips">${[0, 60, 120, 180, 240, 300, 360].map(m => chip('minWeekend', m, hm(m))).join('')}</div>`,
+    () => `<div class="eyebrow">2 de 5 · Tiempo</div><h1>¿Cuánto tiempo tienes para el temario?</h1><p class="muted">Como referencia, en 1 hora se estudian unas 8 páginas de resumen con sus preguntas. Después medimos lo que tardas tú y el plan se ajusta solo.</p>
+      ${has('ingles') || has('psico') ? `<div class="upd" style="margin-top:4px">${icon('check')} ${[has('ingles') ? 'Inglés 20 min' : '', has('psico') ? 'psicotécnicos 20 min' : ''].filter(Boolean).join(' + ')} al día van aparte</div>` : ''}
+      <label>De lunes a viernes</label><div class="chips">${[30, 45, 60, 90, 120, 180, 240].map(m => chip('minWeek', m, hm(m))).join('')}</div>
+      <label>Sábados y domingos</label><div class="chips">${[0, 30, 45, 60, 90, 120, 180, 240].map(m => chip('minWeekend', m, hm(m))).join('')}</div>`,
     () => `<div class="eyebrow">3 de 5 · Descanso</div><h1>Tus días libres</h1><p class="muted">Esos días no te pondremos temario.</p>
       <label>Días libres cada semana</label><div class="chips">${[1, 2, 3, 4, 5, 6, 0].map(d => chip('off', d, ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][d], true)).join('')}</div>
       <label>Además, un día extra de descanso…</label><div class="chips">${chip('restEvery', 0, 'Nunca')}${chip('restEvery', 2, 'Cada 2 semanas')}${chip('restEvery', 3, 'Cada 3 semanas')}${chip('restEvery', 4, 'Cada 4 semanas')}</div>
       <label>Días de repaso final antes del examen (simulacros y falladas)</label><div class="chips">${[0, 3, 5, 7, 10, 14].map(d => chip('finalDays', d, d ? d + ' días' : 'Ninguno')).join('')}</div>`,
-    () => `<div class="eyebrow">4 de 5 · Punto de partida</div><h1>¿Cómo quieres enfocarlo?</h1>
-      <label>¿Desde dónde empiezas?</label><div class="chips">${chip('level', 'cero', 'Empiezo de cero')}${chip('level', 'repaso', 'Ya me lo he estudiado: quiero repasar')}</div>
-      <label>Orden de los temas</label><div class="chips">${chip('priority', 'recomendada', 'Recomendado: más Meteo, Navegación y FFHH')}${chip('priority', 'examen', 'Según lo que más cae en el examen')}${chip('priority', 'orden', 'En orden, del tema 1 al 9')}</div>
+    () => `<div class="eyebrow">4 de 5 · Si te sobra tiempo</div><h1>¿Qué hacemos con los días que sobren?</h1><p class="muted">Si con tu tiempo terminas el temario antes del examen, elige cómo usarlo.</p>
+      <div class="chips">${chip('spare', 'repaso', 'Terminar antes y dedicar lo que sobre a repasar')}${chip('spare', 'repartir', 'Repartirlo: menos temario cada día')}</div>
       <label class="chk" style="margin-top:16px"><span class="switch"><input type="checkbox" id="went" ${c.entorno ? 'checked' : ''}><i></i></span> Incluir el tema 7 (Entorno profesional)</label>`,
-    () => { const st = preview(); return `<div class="eyebrow">5 de 5 · Tu plan</div><h1>${has('ingles') || has('psico') ? 'Práctica diaria y resumen' : 'Tu plan está listo'}</h1>
-      ${has('ingles') ? `<label>Inglés cada día de estudio</label><div class="chips">${[10, 15, 20, 30, 45].map(m => chip('eng', m, m + ' min')).join('')}</div>` : ''}
-      ${has('psico') ? `<label>Psicotécnicos cada día de estudio</label><div class="chips">${[10, 15, 20, 30, 45].map(m => chip('psico', m, m + ' min')).join('')}</div>` : ''}
-      <p class="small muted" style="margin-top:14px">Calculado con ${Pace.page()} min por página${Pace.measured() ? ' (tu ritmo real)' : ' (2 páginas ≈ 1 h)'} más el tiempo de sus preguntas.</p><div class="sumbox"><div><b>${st.total}</b><span>tareas de temario</span></div><div><b>${st.hoursLeft} h</b><span>de estudio</span></div><div><b>${st.daysLeft}</b><span>días de estudio</span></div><div><b>${fmtDate(st.exam)}</b><span>examen</span></div></div>
-      ${st.ok ? `<p class="okmsg">${icon('check')} Con tu tiempo terminas el temario el <b>${fmtDate(st.finish, { day: 'numeric', month: 'long' })}</b> y te quedan días para el repaso final.</p>` : `<div class="warnbox">${icon('alert')}<div>No te da tiempo a todo: necesitas unas ${st.hoursLeft} h y tienes ${st.capHours} h. Puedes crear el plan igualmente (los días irán más cargados) o volver atrás y ajustar.</div></div>`}`; },
+    () => { const st = preview(); return `<div class="eyebrow">5 de 5 · Tu plan</div><h1>Tu plan está listo</h1>
+      <p class="small muted">Calculado con el ${Pace.label()}.</p><div class="sumbox"><div><b>${st.hoursLeft} h</b><span>de temario</span></div><div><b>${st.daysLeft}</b><span>días de estudio</span></div><div><b>${st.ok ? fmtDate(st.finish, { day: 'numeric', month: 'short' }) : '—'}</b><span>terminas el temario</span></div><div><b>${fmtDate(st.exam)}</b><span>examen</span></div></div>
+      ${st.ok ? `<p class="okmsg">${icon('check')}<span>Te da tiempo de sobra: terminas el temario el <b>${fmtDate(st.finish, { day: 'numeric', month: 'long' })}</b>${st.spare ? ` y <b>te sobran ${st.spare} días</b> que usaremos para ${c.spare === 'repartir' ? 'ir más desahogado' : 'repasar'}` : ''}, además de los días de repaso final.</span></p>` : `<div class="warnbox">${icon('alert')}<div>Con este tiempo no llegas a todo: necesitas unas ${st.hoursLeft} h de temario y tienes ${st.capHours} h. Sube el tiempo diario o crea el plan igualmente (los días irán más cargados).</div></div>`}`; },
   ];
   if (c.known == null) c.known = c.examDate ? 1 : 0;
   app(`<div class="wizard"><div class="wbar"><i style="width:${pct(WZ.step, N - 1)}%"></i></div><div class="card wcard">${steps[WZ.step]()}
@@ -738,11 +770,9 @@ routes['resumenes'] = (args, q) => {
   const [t, p] = args;
   if (!t) {
     const list = TOPICS.map(x => x.id).filter(id => pagesOf(id).length);
-    const missing = TOPICS.filter(x => !pagesOf(x.id).length && x.id !== 'oaci');
-    app(`${head('Estudiar', 'Resúmenes', 'Tus apuntes, dentro de la app y sin descargar nada. Al marcar páginas como estudiadas, sus preguntas del cuestionario entran en el repaso a 1, 3 y 7 días.')}
+    app(`${head('Estudiar', 'Estudiar', 'Resúmenes de cada tema, verificados y revisados por expertos en la oposición y actualizados al temario 2026: todo lo que necesitas para el examen, sin descargar nada. Al marcar páginas como estudiadas, sus preguntas entran en el repaso a 1, 3 y 7 días.')}
     <div class="topics" style="margin-top:14px">${list.map(id => { const x = TOP[id], v = R.res[id]; const n = v.pages.length; const rd = v.pages.filter(pg => S.rd[id + ':' + pg.p]?.v).length;
-      return `<a class="topic" href="#/resumenes/${id}" style="--tc:${x.c}33"><div class="n">TEMA ${x.n} · ${n} ${v.bysec ? 'secciones' : 'páginas'}</div><div class="nm">${x.name}</div><div class="small muted">${esc(v.src)}</div><div class="bar"><i style="width:${pct(rd, n)}%;background:${x.c}"></i></div><div class="small muted">${rd}/${n} estudiadas</div></a>`; }).join('')}</div>
-    ${missing.length ? `<div class="warnbox">${icon('alert')}<div>Me faltan tus resúmenes de: ${missing.map(x => x.name).join(', ')}.</div></div>` : ''}`);
+      return `<a class="topic" href="#/resumenes/${id}" style="--tc:${x.c}33"><div class="n">TEMA ${x.n} · ${n} ${v.bysec ? 'secciones' : 'páginas'}</div><div class="nm">${x.name}</div><div class="small muted">${esc(v.src)}</div><div class="bar"><i style="width:${pct(rd, n)}%;background:${x.c}"></i></div><div class="small muted">${rd}/${n} estudiadas</div></a>`; }).join('')}</div>`);
     return;
   }
   const v = R.res[t]; if (!v) return app('<div class="card empty">Resumen no disponible</div>');
@@ -771,12 +801,12 @@ routes['memorizar'] = (args, q) => {
   const fails = (R.docFails || []).filter(id => Q[id]);
   if (i == null) {
     const byT = {}; fails.forEach(id => { const t = Q[id].t; (byT[t] = byT[t] || []).push(id); });
-    app(`${head('Estudiar', 'Memorizar', 'Los datos concretos que te hiciste para aprender de memoria y tus preguntas falladas. Usa el modo huecos para ponerte a prueba.')}
-    <div class="card hl"><div class="row"><div class="list" style="flex:1"><div class="li" style="border:0;padding:0"><div class="ico c-ko">${icon('x')}</div><div><div class="t">Tus preguntas falladas</div><div class="d">${fails.length} preguntas de tu documento, con la respuesta oficial del cuestionario</div></div></div></div><button class="btn" id="allF">${icon('play')} Practicar</button></div>
-    <div class="chips" style="margin-top:12px">${Object.entries(byT).map(([t, l]) => `<button class="chip" data-ft="${t}">${esc(TOP[t]?.short)} · ${l.length}</button>`).join('')}</div></div>
+    app(`${head('Estudiar', 'Memorizar', 'Los datos clave que tienes que saber de memoria para el examen. Usa el modo huecos para ponerte a prueba.')}
+    ${ME.admin && fails.length ? `<div class="card hl"><div class="row"><div class="list" style="flex:1"><div class="li" style="border:0;padding:0"><div class="ico c-ko">${icon('x')}</div><div><div class="t">Preguntas falladas guardadas</div><div class="d">${fails.length} preguntas · solo visible para el administrador</div></div></div></div><button class="btn" id="allF">${icon('play')} Practicar</button></div>
+    <div class="chips" style="margin-top:12px">${Object.entries(byT).map(([t, l]) => `<button class="chip" data-ft="${t}">${esc(TOP[t]?.short)} · ${l.length}</button>`).join('')}</div></div>` : ''}
     <h2>Datos para memorizar</h2>
     <div class="topics">${R.mem.map((m, k) => { const x = TOP[m.t] || {}; const n = (m.h.match(/<strong>/g) || []).length; return `<a class="topic" href="#/memorizar/${k}" style="--tc:${x.c || '#22d3ee'}33"><div class="n">${x.n ? 'TEMA ' + x.n : ''}</div><div class="nm">${esc(x.name || m.title)}</div><div class="small muted">${n} datos clave</div><div class="row" style="margin-top:10px"><span class="pill">${icon('book')} Leer</span><span class="pill cyan">${icon('eye')} Huecos</span><span class="pill violet">${icon('cards')} Tarjetas</span></div></a>`; }).join('')}</div>`);
-    $('#allF').onclick = () => startQuiz({ title: 'Tus falladas', list: shuffle(fails), back: '#/memorizar' });
+    const af = $('#allF'); if (af) af.onclick = () => startQuiz({ title: 'Falladas guardadas', list: shuffle(fails), back: '#/memorizar' });
     $$('[data-ft]').forEach(b => b.onclick = () => startQuiz({ title: 'Falladas · ' + TOP[b.dataset.ft].short, list: shuffle(byT[b.dataset.ft]), back: '#/memorizar' }));
     return;
   }
@@ -811,15 +841,23 @@ routes['memorizar'] = (args, q) => {
 /* ---------- Temario oficial (lo esencial) ---------- */
 routes['temario'] = (args) => {
   const keys = Object.keys(D.tem).sort((a, b) => a - b); const n = args[0] || keys[0]; const page = args[1]; const T = D.tem[n];
-  app(`${head('Estudiar', 'Temario oficial', 'Lo esencial de cada tema oficial, página a página, para consultarlo rápido.')}
+  const cap1 = x => x.charAt(0).toUpperCase() + x.slice(1);
+  const hl = (txt, re) => re ? esc(txt).replace(re, m => `<mark>${m}</mark>`) : esc(txt);
+  app(`${head('Practicar', 'Temario oficial', 'Las frases y términos clave del temario oficial, página a página. Útil para repasar rápido o comprobar de dónde sale una pregunta.')}
   <div class="chips" style="margin:14px 0">${keys.map(k => { const t = TOPICS.find(x => String(x.n) === k); return `<a class="chip ${k === n ? 'on' : ''}" href="#/temario/${k}">T${k} ${t ? t.short : ''}</a>`; }).join('')}</div>
-  <div class="card flat"><h3>${esc(T.name)}</h3><input id="f" placeholder="Buscar en el temario…" style="margin-top:10px"></div><div id="pages"></div>`);
+  <div class="card flat temhead"><div><div class="tiny">Tema ${esc(n)}</div><h3>${esc(T.name.replace(/^Tema\s*\d+\s*[-–:]\s*/i, ''))}</h3></div><div class="search">${icon('search')}<input id="f" placeholder="Buscar en el tema…"></div></div><div id="pages"></div>`);
   const draw = f => {
     const re = f ? new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : null;
-    $('#pages').innerHTML = T.pages.filter(([, t]) => !re || re.test(t)).map(([p, t]) => `<div class="hlblock" id="p${p}"><div class="p">PÁGINA ${p}</div>${re ? esc(t).replace(new RegExp(esc(f).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`) : esc(t)}</div>`).join('') || '<div class="empty">Sin resultados</div>';
+    $('#pages').innerHTML = T.pages.filter(([, t]) => !re || re.test(t)).map(([p, t]) => {
+      const parts = t.split(/\s+·\s+/).map(x => x.trim()).filter(Boolean);
+      const long = parts.filter(x => x.split(/\s+/).length >= 4), short = parts.filter(x => x.split(/\s+/).length < 4);
+      return `<article class="tempage" id="p${p}"><div class="tpn"><span>pág.</span><b>${p}</b></div><div class="tpb">
+        ${long.length ? `<ul>${long.map(x => `<li>${hl(cap1(x), re)}</li>`).join('')}</ul>` : ''}
+        ${short.length ? `<div class="terms">${short.map(x => `<span>${hl(x, re)}</span>`).join('')}</div>` : ''}</div></article>`;
+    }).join('') || '<div class="card empty">Sin resultados</div>';
   };
   draw(''); $('#f').oninput = e => draw(e.target.value.trim());
-  if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.hlblock').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.style.borderColor = 'var(--cyan)'; el.style.boxShadow = '0 0 0 3px rgba(34,211,238,.18)'; } }, 60);
+  if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.tempage').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('focus'); } }, 60);
 };
 
 
@@ -831,13 +869,14 @@ routes['practicar'] = () => hub('Practicar', [
   ['cuestionarios', 'layers', 'Cuestionarios por tema', 'En orden y por bloques, con % completado'],
   ['repaso', 'repeat', 'Repaso 1 · 3 · 7 días', `${dueReviews().length} pendientes hoy`],
   ['examenes', 'exam', 'Exámenes y simulacros', '10 exámenes oficiales + simulacros de 50'],
-  ['ingles', 'globe', 'Inglés', 'Grammar y vocabulary + exámenes tipo ENAIRE'],
-  ['psicotecnicos', 'brain', 'Psicotécnicos', 'Series, cálculo, atención y memoria'],
+  ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
 ]);
 routes['mas'] = () => {
   hub('Más', [
-    ['resumenes', 'book', 'Resúmenes', 'Tus apuntes dentro de la app'],
+    ['resumenes', 'book', 'Estudiar', 'Resúmenes verificados de cada tema'],
     ['memorizar', 'brain', 'Memorizar', 'Datos clave en modo huecos y tarjetas'],
+    ['ingles', 'globe', 'Inglés', 'Grammar y vocabulary + exámenes tipo examen'],
+    ['psicotecnicos', 'brain', 'Psicotécnicos', 'Series, cálculo, atención y memoria'],
     ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
   ]);
 };
