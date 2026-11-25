@@ -599,8 +599,11 @@ routes[''] = () => {
   const h = new Date().getHours(); const hi = h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches';
   const prio = TOPICS.filter(t => t.id !== 'entorno');
   app(`${head(fmtDate(ymd(), { weekday: 'long', day: 'numeric', month: 'long' }), `${hi}, ${esc((SESS.name || '').split(' ')[0] || 'piloto')}`, 'Tu torre de control para la oposición a controlador de ENAIRE.')}
+  <div class="card planhome"><div class="row" style="margin-bottom:2px"><div style="flex:1;min-width:200px"><div class="tiny">Tu plan de estudio</div></div>
+    <a class="btn sm" href="#/plan">${icon('grid')} Ver mi plan</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar</a></div>
+    ${examCountdown()}${planSummary(P.stats(), P.cfg())}</div>
   <div class="grid g4" style="margin-top:16px">
-    <a class="kpi" href="#/planning"><div class="ic c-cyan">${icon('target')}</div><div class="tiny">Examen</div><div class="v">${days != null ? (days >= 0 ? days : '—') : '—'}</div><div class="s">${S.settings.examDate ? 'días · ' + fmtDate(S.settings.examDate) : 'Ponla en Planning'}</div></a>
+    <a class="kpi" href="#/stats"><div class="ic c-cyan">${icon('target')}</div><div class="tiny">Preguntas</div><div class="v">${Object.values(S.q).filter(r => r.n).length}</div><div class="s">respondidas en total</div></a>
     <a class="kpi" href="#/repaso"><div class="ic c-violet">${icon('repeat')}</div><div class="tiny">Repasos hoy</div><div class="v">${dr.length}</div><div class="s">1 · 3 · 7 días</div></a>
     <a class="kpi" href="#/falladas"><div class="ic c-ko">${icon('x')}</div><div class="tiny">Falladas</div><div class="v">${pf.length}</div><div class="s">pendientes de dominar</div></a>
     <a class="kpi" href="#/stats"><div class="ic c-amber">${icon('flame')}</div><div class="tiny">Racha</div><div class="v">${st}</div><div class="s">${todayN} preguntas hoy</div></a>
@@ -615,6 +618,7 @@ routes[''] = () => {
   <div class="topics">${prio.map(t => { const s = topicStats(t.id); return `<a class="topic" href="#/cuestionarios/${t.id}" style="--tc:${t.c}33"><div class="n">TEMA ${t.n}</div><div class="nm">${t.name}${t.w >= 3 ? '<span class="pill cyan">prioritario</span>' : ''}</div>
     <div class="bar"><i style="width:${pct(s.seen, s.scope)}%;background:${t.c}"></i></div><div class="row small muted"><span>${pct(s.seen, s.scope)}% hecho</span><span class="spacer"></span><span>${pct(s.ok, s.seen)}% acierto</span></div></a>`; }).join('')}</div>
 `);
+  bindExamDate();
 };
 
 /* ---------- Hoy toca ---------- */
@@ -677,6 +681,31 @@ routes['hoy'] = (args, q) => {
 /* ---------- Mi plan ---------- */
 const PLAN_COLS = [['res', 'meteo', 'Meteo'], ['res', 'ffhh', 'FFHH'], ['res', 'carto', 'Carto'], ['res', 'nav', 'Nav'], ['res', 'aero', 'Aero'], ['res', 'fpl', 'Plan vuelo'], ['res', 'inst', 'Instit.'], ['res', 'oaci', 'Códigos'],
   ['q', 'meteo', 'Meteo'], ['q', 'ffhh', 'FFHH'], ['q', 'carto', 'Carto'], ['q', 'nav', 'Nav'], ['q', 'aero', 'Aero'], ['q', 'fpl', 'Plan vuelo'], ['q', 'inst', 'Instit.'], ['q', 'oaci', 'Códigos'], ['x', 'x', 'Diario']];
+function examCountdown() {
+  const c = P.cfg(), ex = P.examDate(); const d = Math.max(0, Math.ceil((new Date(ex + 'T09:00:00') - now()) / DAY));
+  const w = Math.floor(d / 7), r = d % 7;
+  return `<div class="countdown"><div class="cd-num"><b>${d}</b><span>${d === 1 ? 'día' : 'días'}</span></div>
+    <div class="cd-txt"><div class="tiny">Cuenta atrás para el examen</div><div class="cd-date">${fmtDate(ex, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+    <div class="small muted">${d ? `${w ? `${w} semana${w === 1 ? '' : 's'}` : ''}${w && r ? ' y ' : ''}${r ? `${r} día${r === 1 ? '' : 's'}` : ''}` : '¡Es hoy! Mucha suerte ✈'}${c.known == 0 && !c.examDate ? ' · fecha estimada: aún no la has fijado' : ''}</div></div>
+    <label class="cd-edit"><span>${icon('cal')} Cambiar fecha</span><input type="date" id="exdate" value="${ex}" min="${addDays(ymd(), 1)}"></label></div>`;
+}
+function bindExamDate() {
+  const el = $('#exdate'); if (!el) return;
+  const apply = () => { const v = el.value; if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v <= ymd() || v === P.examDate()) return;
+    S.plan = S.plan || {}; S.plan.cfg = Object.assign(P.cfg(), { examDate: v, known: 1 }); S.plan.u = now(); S.settings.examDate = v;
+    const t = ymd(); Object.keys(S.ps || {}).forEach(d => { if (d > t) delete S.ps[d]; }); P._sig = ''; save(true);
+    toast('Fecha del examen cambiada: plan recalculado'); render(); };
+  el.onchange = apply; el.onblur = apply; el.onkeydown = e => { if (e.key === 'Enter') apply(); };
+}
+function planSummary(st, c) {
+  return `  <div class="grid g4" style="margin-top:14px">
+    <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
+    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">${Pace.label()}</div></div>
+    <div class="kpi"><div class="tiny">Días de estudio</div><div class="v">${st.daysLeft}</div><div class="s">hasta el repaso final</div></div>
+    <div class="kpi"><div class="tiny">Ritmo</div><div class="v ${st.ok ? 'c-ok' : 'c-ko'}">${st.ok ? 'Vas bien' : 'Vas justo'}</div><div class="s">${st.ok ? `terminas el temario el ${fmtDate(st.finish)}` : `necesitas ${st.hoursLeft} h y tienes ${st.capHours} h`}</div></div></div>
+  ${st.ok && st.spare ? `<p class="okmsg">${icon('check')}<span>Te sobran <b>${st.spare} días</b> antes del repaso final: ${c.spare === 'repartir' ? 'puedes ir más desahogado o' : 'los dedicamos a repasar (repaso de temas anteriores, falladas y simulacros). Si prefieres'} <a href="#/bienvenida?edit=1">${c.spare === 'repartir' ? 'terminar antes' : 'repartir el temario en más días'}</a>.</span></p>` : ''}
+  ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}`;
+}
 routes['plan'] = () => {
   const t = ymd(); const st = P.stats(); const c = P.cfg();
   const from = [c.start, ...Object.keys(S.ps || {})].sort()[0] < t ? [c.start, ...Object.keys(S.ps || {})].sort()[0] : t; const end = P.examDate();
@@ -691,13 +720,8 @@ routes['plan'] = () => {
     const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall', 'ciclo'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' preg.' : 'nº ' + i.a + '–' + i.b) : k === 'x' ? itemLabel(i).replace('Repaso de temas anteriores', 'Repaso') : 'págs. ' + i.a + (i.b !== i.a ? '–' + i.b : ''))}</span>`).join('')}</td>`; }).join('');
     return `<tr class="${d === t ? 'trow' : ''}"><th><a href="#/hoy?f=${d}">${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</a></th>${cells}</tr>`; }).join('');
   app(`${head('Seguimiento', 'Mi plan', 'Tu plan día a día: qué páginas estudiar y qué preguntas hacer cada día. Lo que no haces se recoloca y lo que adelantas te libera días.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
-  <div class="grid g4" style="margin-top:14px">
-    <div class="kpi"><div class="tiny">Hecho</div><div class="v">${pct(st.done, st.total)}%</div><div class="s">${st.done} de ${st.total} tareas</div></div>
-    <div class="kpi"><div class="tiny">Te queda</div><div class="v">${st.hoursLeft} h</div><div class="s">${Pace.label()}</div></div>
-    <div class="kpi"><div class="tiny">Días de estudio</div><div class="v">${st.daysLeft}</div><div class="s">hasta el repaso final</div></div>
-    <div class="kpi"><div class="tiny">Ritmo</div><div class="v ${st.ok ? 'c-ok' : 'c-ko'}">${st.ok ? 'Vas bien' : 'Vas justo'}</div><div class="s">${st.ok ? `terminas el temario el ${fmtDate(st.finish)}` : `necesitas ${st.hoursLeft} h y tienes ${st.capHours} h`}</div></div></div>
-  ${st.ok && st.spare ? `<p class="okmsg">${icon('check')}<span>Te sobran <b>${st.spare} días</b> antes del repaso final: ${c.spare === 'repartir' ? 'puedes ir más desahogado o' : 'los dedicamos a repasar (repaso de temas anteriores, falladas y simulacros). Si prefieres'} <a href="#/bienvenida?edit=1">${c.spare === 'repartir' ? 'terminar antes' : 'repartir el temario en más días'}</a>.</span></p>` : ''}
-  ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}
+  <div class="card">${examCountdown()}</div>
+  ${planSummary(st, c)}
   <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
   <h2>Día a día</h2>
   <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="8" class="grp">Resúmenes (páginas)</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th><th rowspan="2">Diario</th></tr>
@@ -707,6 +731,7 @@ routes['plan'] = () => {
   <h2>Calendario</h2>
   <div class="card"><div class="hstrip">${strip}</div>
     <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span><span><i class="lg final"></i>repaso final</span><span><i class="lg off"></i>libre</span><span><i class="lg exam"></i>examen</span></div></div>`);
+  bindExamDate();
 };
 
 /* ---------- Bienvenida y configuración del plan ---------- */

@@ -561,3 +561,22 @@ body.light .tref{background:#fff;border-color:rgba(15,23,42,.06);box-shadow:0 1p
 .fctx{text-align:center;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan);margin:6px 0 -14px}
 .cloze strong:not(.rev){display:inline-block;min-width:3.2em;line-height:1.35;cursor:pointer}
 .head p{max-width:none}
+.planhome .grid.g4{margin-top:12px!important}
+.planhome .kpi{box-shadow:none;background:var(--glass)}
+body.light .planhome .kpi{box-shadow:none;background:#f5f7fb;border-color:transparent}
+.planhome .okmsg,.planhome .warnbox{margin-bottom:0}
+
+/* Cuenta atrás del examen */
+.countdown{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.planhome .countdown{margin:10px 0 4px;padding:16px;border-radius:16px;background:linear-gradient(135deg,rgba(6,182,212,.08),rgba(37,99,235,.06))}
+.cd-num{width:92px;height:92px;border-radius:24px;background:var(--grad);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;box-shadow:0 14px 30px -14px rgba(37,99,235,.7)}
+.cd-num b{font:800 36px/1 var(--mono)}
+.cd-num span{font-size:12.5px;font-weight:600;opacity:.9;margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+.cd-txt{flex:1;min-width:200px}
+.cd-date{font-size:20px;font-weight:800;margin:3px 0 2px}
+.cd-date::first-letter{text-transform:uppercase}
+.cd-edit{display:flex;flex-direction:column;gap:6px;margin:0;font-weight:600;font-size:13px;color:var(--muted);min-width:180px}
+.cd-edit span{display:flex;align-items:center;gap:6px}
+.cd-edit svg{width:15px;height:15px}
+.cd-edit input{padding:9px 12px}
+@media(max-width:600px){.cd-num{width:76px;height:76px;border-radius:20px}.cd-num b{font-size:30px}.cd-edit{width:100%}}
