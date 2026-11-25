@@ -173,3 +173,6 @@ h1,h2,h3,h4{margin:0;line-height:1.1;letter-spacing:-.025em}
 .phases span:first-child::before{content:"—";margin:0 10px}
 @media(max-width:600px){.phases{font-size:14px}.phases span:first-child{flex-basis:auto}.phases span:first-child::before{content:"";margin:0}.phases{column-gap:0}.phases>span:first-of-type{margin-left:0}}
 @media(max-width:600px){.phases{display:block}.phases span{display:inline}.phases span:first-child::before{content:"\A";white-space:pre}}
+.herotxt h1{margin-bottom:18px}
+.herotxt .upd{margin:0 0 14px}
+.herotxt .phases{margin:0 0 24px}
