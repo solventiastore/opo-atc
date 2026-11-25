@@ -219,7 +219,7 @@ async function route() {
   const { r, q } = hashInfo();
   if (r === 'oauth' && q.t) { SESS = { token: q.t }; localStorage.setItem(SESS_KEY, JSON.stringify(SESS)); history.replaceState(null, '', 'app.html#/'); }
   if (!SESS?.token) {
-    if (r === 'registro') return viewRegister(q);
+    if (r === 'registro') { if (q.error === 'codigo') setTimeout(() => { const e = $('#er'); if (e) e.textContent = 'Para crear una cuenta necesitas un código de invitación. Escríbelo arriba y regístrate con tu email.'; }, 300); return viewRegister(q); }
     if (r === 'verificado') return viewMsg(q.error ? 'Enlace caducado' : 'Email confirmado', q.error ? 'El enlace ya no es válido. Entra y pide uno nuevo.' : 'Tu email está confirmado. Entra para elegir tu plan.', 'Entrar');
     return viewLogin(q.error === 'google' ? 'No se pudo entrar con Google. Inténtalo de nuevo o usa tu email.' : '');
   }

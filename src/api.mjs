@@ -289,6 +289,8 @@ export async function handle(req, ctx) {
     let u = await getUser(s, email);
     if (!u) {
       const firstUser = (await userKeys(s)).length === 0;
+      // Solo por invitación: con Google no se pueden crear cuentas nuevas (hay que registrarse con un código)
+      if (INVITE_ONLY && !firstUser) return redirect("/app.html#/registro?error=codigo");
       u = { user: email, email, name: prof.given_name || "", surname: prof.family_name || "", google: prof.sub, created: Date.now(), verified: true, v: 2, wantPlan: PLANS[st.plan] ? st.plan : null };
       await putUser(s, u); if (firstUser) await s.setJSON("meta:admins", [u.user]);
     } else if (!u.google) { u.google = prof.sub; u.verified = true; await putUser(s, u); }
