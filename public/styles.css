@@ -521,3 +521,10 @@ h2.sub svg{width:18px;height:18px;color:var(--cyan)}
 .auth .panel{padding:0;justify-content:center}
 .auth .radar{width:min(240px,60vw);margin:28px 0 0}
 @media(max-width:959px){.auth{padding:28px 18px 40px}.auth .hero{max-width:none}}
+
+/* Contraseña con «ojito» */
+.pwbox{position:relative}
+.pwbox input{padding-right:46px}
+.pwbox .eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:0;border-radius:10px;background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center}
+.pwbox .eye:hover{background:var(--glass2);color:var(--ink)}
+.pwbox .eye svg{width:18px;height:18px}

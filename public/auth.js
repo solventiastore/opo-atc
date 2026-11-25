@@ -6,7 +6,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SESS_KEY = 'opo_session', ME_KEY = 'opo_me';
-const VERSION = '20261125c';
+const VERSION = '20261125d';
 let SESS = null; try { SESS = JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); } catch (e) {}
 if (SESS && SESS.local) { SESS = null; localStorage.removeItem(SESS_KEY); }
 
@@ -21,6 +21,8 @@ const SOURCES = ['Google', 'Instagram', 'TikTok', 'YouTube', 'Un amigo o compañ
 const IC = {
   check: '<path d="M20 6 9 17l-5-5"/>', mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>', lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c6.5 0 10 8 10 8a17.6 17.6 0 0 1-2.2 3.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6M2 2l20 20M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
 };
 const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
@@ -70,6 +72,10 @@ function frame(inner) {
     </section>
     <section class="panel"><div class="card gate-card">${inner}</div></section></div>`;
 }
+const pwField = (id, label, ac, ph = '') => `<label for="${id}">${label}</label><div class="pwbox"><input id="${id}" type="password" autocomplete="${ac}" ${ph ? `placeholder="${ph}"` : ''} required><button type="button" class="eye" data-eye="${id}" aria-label="Mostrar contraseña" title="Mostrar contraseña">${icon('eye')}</button></div>`;
+function bindEyes() {
+  $$('[data-eye]').forEach(b => b.onclick = () => { const i = $('#' + b.dataset.eye); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.innerHTML = icon(show ? 'eyeOff' : 'eye'); b.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña'); b.title = b.getAttribute('aria-label'); i.focus(); });
+}
 const steps = (n, labels = ['Cuenta', 'Email', 'Empezar']) => `<ol class="steps">${labels.map((s, i) => `<li class="${i < n ? 'done' : i === n ? 'on' : ''}"><span>${i < n ? icon('check') : i + 1}</span>${s}</li>`).join('')}</ol>`;
 const seg = mode => `<div class="seg" style="width:100%;margin-bottom:14px"><a href="#/entrar" class="${mode === 'login' ? 'on' : ''}">Entrar</a><a href="#/registro" class="${mode === 'register' ? 'on' : ''}">Crear cuenta</a></div>`;
 
@@ -78,8 +84,9 @@ function viewLogin(err) {
     frame(`${seg('login')}<h2>Entra en tu cuenta</h2>
       ${c.google ? `<a class="btn-google" href="/api/auth/google">${G} Continuar con Google</a><div class="or"><span>o con tu email</span></div>` : ''}
       <form id="f" novalidate><label>Email o usuario</label><input id="em" autocomplete="username" autocapitalize="none" required>
-      <label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" required>
+      ${pwField('pw', 'Contraseña', 'current-password')}
       <button class="btn block" style="margin-top:18px">Entrar</button><div class="err" id="er">${esc(err || '')}</div></form>`);
+    bindEyes();
     $('#f').onsubmit = async e => { e.preventDefault(); const b = $('#f button'); b.disabled = true; $('#er').textContent = '';
       try { const r = await api('login', { method: 'POST', body: { user: $('#em').value, pass: $('#pw').value } }); setSession(r.token, r); route(); }
       catch (er) { $('#er').textContent = er.status ? er.message : 'Sin conexión con el servidor'; b.disabled = false; } };
@@ -106,15 +113,17 @@ function viewRegister(q) {
         <label>Repite el email</label><input id="em2" type="email" autocomplete="off" required onpaste="return false">
         <div class="g2"><div><label>Fecha de nacimiento</label><input id="bd" type="date" max="${new Date().toISOString().slice(0, 10)}" required></div>
         <div><label>¿Cómo nos has encontrado?</label><select id="src" required><option value="">Elige una opción</option>${SOURCES.map(s => `<option>${s}</option>`).join('')}</select></div></div>
-        <label>Contraseña</label><input id="pw" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres" required>
+        <div class="g2"><div>${pwField('pw', 'Contraseña', 'new-password', 'Mínimo 8 caracteres')}</div><div>${pwField('pw2', 'Repite la contraseña', 'new-password')}</div></div>
         <label class="chk"><input type="checkbox" id="tc"> <span>Acepto los <a href="legal.html#terminos" target="_blank">términos</a> y la <a href="legal.html#privacidad" target="_blank">política de privacidad</a></span></label>
         <label class="chk"><input type="checkbox" id="mk"> <span>Quiero recibir novedades de la oposición (opcional)</span></label>
         ${c.captcha ? '<div id="cap" class="cap"></div>' : ''}
         <button class="btn block" style="margin-top:16px">Crear cuenta ${icon('arrow')}</button><div class="err" id="er"></div></form>`);
-    mountCaptcha(c.captcha);
+    mountCaptcha(c.captcha); bindEyes();
     $('#f').onsubmit = async e => { e.preventDefault(); const b = $('#f button'); $('#er').textContent = '';
       const v = { name: $('#nm').value, surname: $('#sn').value, email: $('#em').value, email2: $('#em2').value, birth: $('#bd').value, source: $('#src').value, pass: $('#pw').value, invite: $('#inv')?.value || '', terms: $('#tc').checked, marketing: $('#mk').checked, plan: q.plan };
       if (v.email.trim().toLowerCase() !== v.email2.trim().toLowerCase()) { $('#er').textContent = 'Los dos emails no coinciden'; return; }
+      if (v.pass.length < 8) { $('#er').textContent = 'La contraseña debe tener al menos 8 caracteres'; return; }
+      if (v.pass !== $('#pw2').value) { $('#er').textContent = 'Las dos contraseñas no coinciden'; return; }
       if (!v.terms) { $('#er').textContent = 'Debes aceptar los términos y la política de privacidad'; return; }
       if (c.captcha) { v.captcha = window.grecaptcha ? window.grecaptcha.getResponse(capWidget) : ''; if (!v.captcha) { $('#er').textContent = 'Marca la casilla «No soy un robot»'; return; } }
       b.disabled = true;
