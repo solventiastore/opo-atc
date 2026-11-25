@@ -706,6 +706,53 @@ function planSummary(st, c) {
   ${st.ok && st.spare ? `<p class="okmsg">${icon('check')}<span>Te sobran <b>${st.spare} días</b> antes del repaso final: ${c.spare === 'repartir' ? 'puedes ir más desahogado o' : 'los dedicamos a repasar (repaso de temas anteriores, falladas y simulacros). Si prefieres'} <a href="#/bienvenida?edit=1">${c.spare === 'repartir' ? 'terminar antes' : 'repartir el temario en más días'}</a>.</span></p>` : ''}
   ${st.ok ? '' : `<div class="warnbox">${icon('alert')}<div>Con el tiempo que indicaste no da para todo el temario antes del repaso final. El plan reparte lo que queda igualmente, pero los días saldrán más cargados. <a href="#/bienvenida?edit=1">Ajusta tu plan</a> (más tiempo diario o menos días libres).</div></div>`}`;
 }
+/* Agenda del plan: vistas Semana / Día / Todo, navegación y filtro por tema */
+const PV = (() => { try { return JSON.parse(localStorage.getItem('opo_planview') || '{}'); } catch (e) { return {}; } })();
+function planDays(ctx) {
+  const { t, end, itemsFor } = ctx; const box = $('#pday'); if (!box) return;
+  const v = PV.v || 'semana', tf = PV.t || 'all';
+  const anchor = PV.a && PV.a >= ctx.from && PV.a <= end ? PV.a : t;
+  const monday = d => addDays(d, -((dow(d) + 6) % 7));
+  const DAILY = ['eng', 'psico', 'ciclo', 'sim', 'fall'];
+  const topicsIn = TOPICS.filter(x => ctx.dates.some(d => itemsFor(d).some(i => i.t === x.id)));
+  const keep = i => tf === 'all' || (tf === 'diario' ? DAILY.includes(i.k) : i.t === tf && !DAILY.includes(i.k));
+  const label = i => i.k === 'res' ? (i.b !== i.a ? `págs. ${i.a}–${i.b}` : `pág. ${i.a}`) : i.k === 'qp' ? `${i.ids.length} preg.` : i.k === 'q' ? `preg. ${i.a}–${i.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', ciclo: 'Repaso anterior', sim: 'Simulacro', fall: 'Falladas' }[i.k] || '');
+  const state = (i, d) => P.done(i.key) ? 'done' : d < t ? 'miss' : d === t ? 'today' : 'fut';
+  const ic = { eng: 'globe', psico: 'brain', ciclo: 'repeat', sim: 'exam', fall: 'x' };
+  const chip = (i, d) => `<span class="ptask ${state(i, d)}" style="--tc:${TOP[i.t]?.c || '#64748b'}" title="${esc(tname(i.t) + ' · ' + label(i))}"><i>${TOP[i.t] ? 'T' + TOP[i.t].n : icon(ic[i.k] || 'star')}</i><span>${esc(label(i))}</span>${P.done(i.key) ? icon('check') : ''}</span>`;
+  const dayCard = d => {
+    const all = itemsFor(d), its = all.filter(keep), off = P.isOff(d), ex = d === end, dn = all.filter(i => P.done(i.key)).length;
+    const body = ex ? '<div class="pnote exam">✈ Día del examen</div>' : off ? '<div class="pnote">Día libre</div>'
+      : its.length ? (P.isFinal(d) ? '<div class="pnote fin">Repaso final</div>' : '') + its.map(i => chip(i, d)).join('') : `<div class="pnote">${all.length ? '—' : 'Sin tareas'}</div>`;
+    return `<div class="pday${d === t ? ' is-today' : ''}${off ? ' is-off' : ''}${ex ? ' is-exam' : ''}${d < t ? ' is-past' : ''}">
+      <a class="pdh" href="#/hoy?f=${d}" title="Abrir en Hoy toca"><b>${fmtDate(d, { weekday: 'short' })}</b><span>${new Date(d + 'T12:00:00').getDate()} ${fmtDate(d, { month: 'short' })}</span>${all.length && !ex && !off ? `<em class="${dn === all.length ? 'ok' : ''}">${dn}/${all.length}</em>` : ''}</a>
+      <div class="pdb">${body}</div></div>`;
+  };
+  let title, body;
+  if (v === 'semana') {
+    const m = monday(anchor); const days = Array.from({ length: 7 }, (_, k) => addDays(m, k));
+    title = `${fmtDate(days[0], { day: 'numeric', month: 'short' })} – ${fmtDate(days[6], { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    body = `<div class="pweek">${days.map(d => d < ctx.from || d > end ? `<div class="pday is-out"><div class="pdh"><b>${fmtDate(d, { weekday: 'short' })}</b><span>${new Date(d + 'T12:00:00').getDate()} ${fmtDate(d, { month: 'short' })}</span></div><div class="pdb"><div class="pnote">—</div></div></div>` : dayCard(d)).join('')}</div>`;
+  } else if (v === 'dia') {
+    title = fmtDate(anchor, { weekday: 'long', day: 'numeric', month: 'long' });
+    body = `<div class="pone">${dayCard(anchor)}<a class="btn sm" href="#/hoy?f=${anchor}">${icon('sun')} Abrir en Hoy toca</a></div>`;
+  } else {
+    title = 'Todo el plan, de hoy al examen';
+    const ds = ctx.dates.filter(d => d >= t || itemsFor(d).some(i => !P.done(i.key) && keep(i))).filter(d => d === end || itemsFor(d).some(keep) || (tf === 'all' && P.isOff(d)));
+    body = `<div class="plist">${ds.map(dayCard).join('')}</div>`;
+  }
+  const navs = v === 'lista' ? '' : `<button class="btn ghost sm" data-step="-1" aria-label="Anterior">${icon('chevL')}</button><button class="btn ghost sm" data-step="0">Hoy</button><button class="btn ghost sm" data-step="1" aria-label="Siguiente">${icon('chevR')}</button>`;
+  box.innerHTML = `<div class="card pagenda">
+    <div class="pbar"><div class="seg">${[['semana', 'Semana'], ['dia', 'Día'], ['lista', 'Todo']].map(([k, l]) => `<button data-pv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="pnav">${navs}<b>${title}</b></div></div>
+    <div class="chips pfilt"><button class="chip ${tf === 'all' ? 'on' : ''}" data-tf="all">Todos los temas</button>${topicsIn.map(x => `<button class="chip ${tf === x.id ? 'on' : ''}" data-tf="${x.id}">T${x.n} ${x.short}</button>`).join('')}<button class="chip ${tf === 'diario' ? 'on' : ''}" data-tf="diario">Inglés, psicos y repasos</button></div>
+    ${body}
+    <div class="plegend"><span><i class="lgd done"></i>hecho</span><span><i class="lgd today"></i>hoy</span><span><i class="lgd fut"></i>pendiente</span><span><i class="lgd miss"></i>no hecho (ya recolocado)</span><span class="muted">Toca un día para abrirlo en Hoy toca</span></div></div>`;
+  const keepPV = () => localStorage.setItem('opo_planview', JSON.stringify(PV));
+  $$('[data-pv]', box).forEach(b => b.onclick = () => { PV.v = b.dataset.pv; keepPV(); planDays(ctx); });
+  $$('[data-tf]', box).forEach(b => b.onclick = () => { PV.t = b.dataset.tf; keepPV(); planDays(ctx); });
+  $$('[data-step]', box).forEach(b => b.onclick = () => { const st = +b.dataset.step; PV.a = st === 0 ? t : addDays(anchor, st * (v === 'semana' ? 7 : 1)); if (PV.a < ctx.from) PV.a = ctx.from; if (PV.a > end) PV.a = end; keepPV(); planDays(ctx); });
+}
 routes['plan'] = () => {
   const t = ymd(); const st = P.stats(); const c = P.cfg();
   const from = [c.start, ...Object.keys(S.ps || {})].sort()[0] < t ? [c.start, ...Object.keys(S.ps || {})].sort()[0] : t; const end = P.examDate();
@@ -714,7 +761,7 @@ routes['plan'] = () => {
   const cache = {}; const itemsFor = d => cache[d] || (cache[d] = d === end ? [] : P.itemsFor(d));
   const strip = dates.map(d => { const its = itemsFor(d); const dn = its.filter(i => P.done(i.key)).length; const pc = its.length ? dn / its.length : 0;
     const c2 = d === end ? 'exam' : P.isOff(d) ? 'off' : !its.length ? 'none' : d < t ? (pc === 1 ? 'full' : pc > 0 ? 'part' : 'miss') : d === t ? 'today' : P.isFinal(d) ? 'final' : 'fut';
-    return `<a class="hs ${c2}" href="#/hoy?f=${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></a>`; }).join('');
+    return `<button class="hs ${c2}" data-day="${d}" title="${fmtDate(d)}: ${dn}/${its.length}"><span>${new Date(d + 'T12:00:00').getDate()}</span></button>`; }).join('');
   const rows = dates.map(d => { if (d === end) return ''; const its = itemsFor(d); if (!its.length && d < t) return '';
     if (P.isOff(d)) return `<tr class="orow"><th>${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">Día libre</td></tr>`;
     const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall', 'ciclo'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' preg.' : 'nº ' + i.a + '–' + i.b) : k === 'x' ? itemLabel(i).replace('Repaso de temas anteriores', 'Repaso') : 'págs. ' + i.a + (i.b !== i.a ? '–' + i.b : ''))}</span>`).join('')}</td>`; }).join('');
@@ -724,14 +771,13 @@ routes['plan'] = () => {
   ${planSummary(st, c)}
   <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
   <h2>Día a día</h2>
-  <div class="card ptable-wrap"><table class="ptable"><thead><tr><th rowspan="2">Día</th><th colspan="8" class="grp">Resúmenes (páginas)</th><th colspan="8" class="grp">Cuestionarios (preguntas)</th><th rowspan="2">Diario</th></tr>
-    <tr>${PLAN_COLS.filter(c2 => c2[0] !== 'x').map(c2 => `<th>${c2[2]}</th>`).join('')}</tr></thead>
-    <tbody>${rows}<tr class="erow"><th>${fmtDate(end, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">EXAMEN ✈</td></tr></tbody></table></div>
-  <div class="small muted" style="margin-top:8px"><span class="pc c-done">verde</span> hecho · <span class="pc c-today">azul</span> hoy · <span class="pc c-fut">gris</span> pendiente · <span class="pc c-miss">ámbar</span> no hecho ese día (ya recolocado)</div>
+  <div id="pday"></div>
   <h2>Calendario</h2>
   <div class="card"><div class="hstrip">${strip}</div>
     <div class="legend" style="justify-content:flex-start;gap:14px;flex-wrap:wrap;margin-top:10px"><span><i class="lg full"></i>hecho</span><span><i class="lg part"></i>a medias</span><span><i class="lg miss"></i>no hecho (recolocado)</span><span><i class="lg today"></i>hoy</span><span><i class="lg fut"></i>pendiente</span><span><i class="lg final"></i>repaso final</span><span><i class="lg off"></i>libre</span><span><i class="lg exam"></i>examen</span></div></div>`);
   bindExamDate();
+  const ctx = { t, end, from, dates, itemsFor }; planDays(ctx);
+  $$('[data-day]').forEach(b => b.onclick = () => { PV.v = 'dia'; PV.a = b.dataset.day; localStorage.setItem('opo_planview', JSON.stringify(PV)); planDays(ctx); $('#pday').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
 };
 
 /* ---------- Bienvenida y configuración del plan ---------- */
