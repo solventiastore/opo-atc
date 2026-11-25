@@ -845,25 +845,42 @@ routes['memorizar'] = (args, q) => {
 };
 
 /* ---------- Temario oficial (lo esencial) ---------- */
-routes['temario'] = (args) => {
-  const keys = Object.keys(D.tem).sort((a, b) => a - b); const n = args[0] || keys[0]; const page = args[1]; const T = D.tem[n];
-  const cap1 = x => x.charAt(0).toUpperCase() + x.slice(1);
-  const hl = (txt, re) => re ? esc(txt).replace(re, m => `<mark>${m}</mark>`) : esc(txt);
-  app(`${head('Practicar', 'Temario oficial', 'Las frases y términos clave del temario oficial, página a página. Útil para repasar rápido o comprobar de dónde sale una pregunta.')}
-  <div class="chips" style="margin:14px 0">${keys.map(k => { const t = TOPICS.find(x => String(x.n) === k); return `<a class="chip ${k === n ? 'on' : ''}" href="#/temario/${k}">T${k} ${t ? t.short : ''}</a>`; }).join('')}</div>
-  <div class="card flat temhead"><div><div class="tiny">Tema ${esc(n)}</div><h3>${esc(T.name.replace(/^Tema\s*\d+\s*[-–:]\s*/i, ''))}</h3></div><div class="search">${icon('search')}<input id="f" placeholder="Buscar en el tema…"></div></div><div id="pages"></div>`);
-  const draw = f => {
-    const re = f ? new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : null;
-    $('#pages').innerHTML = T.pages.filter(([, t]) => !re || re.test(t)).map(([p, t]) => {
-      const parts = t.split(/\s+·\s+/).map(x => x.trim()).filter(Boolean);
-      const long = parts.filter(x => x.split(/\s+/).length >= 4), short = parts.filter(x => x.split(/\s+/).length < 4);
-      return `<article class="tempage" id="p${p}"><div class="tpn"><span>pág.</span><b>${p}</b></div><div class="tpb">
-        ${long.length ? `<ul>${long.map(x => `<li>${hl(cap1(x), re)}</li>`).join('')}</ul>` : ''}
-        ${short.length ? `<div class="terms">${short.map(x => `<span>${hl(x, re)}</span>`).join('')}</div>` : ''}</div></article>`;
-    }).join('') || '<div class="card empty">Sin resultados</div>';
+routes['temario'] = (args, q) => {
+  // Buscador de referencias en el temario oficial (no se muestra el temario por páginas)
+  const base = ch => ch.normalize('NFD')[0].toLowerCase();
+  const fold = t => Array.from(t, base).join('');
+  const topics = Object.keys(D.tem).sort((a, b) => a - b);
+  const idx = []; topics.forEach(n => D.tem[n].pages.forEach(([pg, txt]) => txt.split(/\s+·\s+/).forEach(f => { f = f.trim(); if (f.length > 2) idx.push({ n, pg, f, k: fold(f) }); })));
+  const tname2 = n => { const t = TOPICS.find(x => String(x.n) === String(n)); return t ? t.name : D.tem[n].name; };
+  const mark = (f, words) => { const k = fold(f); const hits = []; words.forEach(w => { let i = k.indexOf(w); while (i >= 0) { hits.push([i, i + w.length]); i = k.indexOf(w, i + w.length); } });
+    hits.sort((x, y) => x[0] - y[0]); let out = '', last = 0; const chars = Array.from(f);
+    hits.forEach(([i, j]) => { if (i < last) return; out += esc(chars.slice(last, i).join('')) + '<mark>' + esc(chars.slice(i, j).join('')) + '</mark>'; last = j; });
+    return out + esc(chars.slice(last).join('')); };
+  const sel = q.t || '';
+  app(`${head('Practicar', 'Temario oficial', 'Busca cualquier término y te decimos en qué tema y página del temario oficial aparece. Útil para comprobar de dónde sale una pregunta o encontrar una referencia.')}
+  <div class="card temsearch"><div class="search big">${icon('search')}<input id="f" placeholder="Busca un término: tropopausa, VOR, RVSM, Eurocontrol…" value="${esc(q.q || '')}" autocomplete="off" enterkeyhint="search"></div>
+    <div class="chips" style="margin-top:12px"><button class="chip ${!sel ? 'on' : ''}" data-tt="">Todos los temas</button>${topics.map(n => { const t = TOPICS.find(x => String(x.n) === n); return `<button class="chip ${sel === n ? 'on' : ''}" data-tt="${n}">T${n} ${t ? t.short : ''}</button>`; }).join('')}</div></div>
+  <div id="res"></div>`);
+  const draw = () => {
+    const raw = $('#f').value.trim(); const words = fold(raw).split(/\s+/).filter(w => w.length >= 2);
+    const box = $('#res');
+    if (args[1] && !raw) { // referencia directa desde una pregunta: tema y página concretos
+      const list = idx.filter(x => x.n === String(args[0]) && String(x.pg) === String(args[1]));
+      box.innerHTML = list.length ? `<div class="tiny" style="margin:6px 2px 10px">Referencia del temario oficial</div><article class="tref"><div class="trefh"><b>${esc(tname2(args[0]))}</b><span class="pill">pág. ${esc(args[1])}</span></div><ul>${list.map(x => `<li>${esc(x.f)}</li>`).join('')}</ul></article>` : '<div class="card empty">No hay texto para esa página.</div>';
+      return;
+    }
+    if (!words.length) { box.innerHTML = `<div class="card empty">${icon('search')}<div>Escribe al menos 2 letras para buscar.</div><div class="chips" style="justify-content:center;margin-top:12px">${['tropopausa', 'VOR', 'RVSM', 'Eurocontrol', 'QNH', 'estela'].map(w => `<button class="chip" data-ex="${w}">${w}</button>`).join('')}</div></div>`;
+      $$('[data-ex]').forEach(c => c.onclick = () => { $('#f').value = c.dataset.ex; draw(); }); return; }
+    const hits = idx.filter(x => (!sel || x.n === sel) && words.every(w => x.k.includes(w)));
+    const groups = new Map(); hits.forEach(x => { const g = x.n + ':' + x.pg; if (!groups.has(g)) groups.set(g, { n: x.n, pg: x.pg, fs: [] }); groups.get(g).fs.push(x.f); });
+    const gs = [...groups.values()].sort((a, b) => a.n - b.n || a.pg - b.pg); const shown = gs.slice(0, 60);
+    box.innerHTML = gs.length ? `<div class="tiny" style="margin:6px 2px 10px">${hits.length} coincidencia${hits.length === 1 ? '' : 's'} en ${gs.length} página${gs.length === 1 ? '' : 's'}${gs.length > shown.length ? ' · se muestran las 60 primeras' : ''}</div>
+      ${shown.map(g => `<article class="tref"><div class="trefh"><b>${esc(tname2(g.n))}</b><span class="pill">pág. ${esc(g.pg)}</span></div><ul>${g.fs.slice(0, 6).map(f => `<li>${mark(f, words)}</li>`).join('')}</ul></article>`).join('')}`
+      : `<div class="card empty">${icon('search')}<div>No aparece «${esc(raw)}»${sel ? ' en este tema' : ''} en el temario oficial.</div></div>`;
   };
-  draw(''); $('#f').oninput = e => draw(e.target.value.trim());
-  if (page) setTimeout(() => { const el = document.getElementById('p' + page) || $$('.tempage').find(x => +x.id.slice(1) >= +page); if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('focus'); } }, 60);
+  let t0; $('#f').oninput = () => { clearTimeout(t0); t0 = setTimeout(() => { history.replaceState(null, '', `#/temario?q=${encodeURIComponent($('#f').value.trim())}${sel ? '&t=' + sel : ''}`); args = []; draw(); }, 180); };
+  $$('[data-tt]').forEach(c => c.onclick = () => { location.hash = `#/temario?q=${encodeURIComponent($('#f').value.trim())}${c.dataset.tt ? '&t=' + c.dataset.tt : ''}`; });
+  draw(); if (!args[1]) $('#f').focus();
 };
 
 
@@ -875,7 +892,7 @@ routes['practicar'] = () => hub('Practicar', [
   ['cuestionarios', 'layers', 'Cuestionarios por tema', 'En orden y por bloques, con % completado'],
   ['repaso', 'repeat', 'Repaso 1 · 3 · 7 días', `${dueReviews().length} pendientes hoy`],
   ['examenes', 'exam', 'Exámenes y simulacros', '10 exámenes oficiales + simulacros de 50'],
-  ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
+  ['temario', 'marker', 'Temario oficial', 'Buscador de referencias del temario'],
 ]);
 routes['mas'] = () => {
   hub('Más', [
@@ -883,7 +900,7 @@ routes['mas'] = () => {
     ['memorizar', 'brain', 'Memorizar', 'Datos clave en modo huecos y tarjetas'],
     ['ingles', 'globe', 'Inglés', 'Grammar y vocabulary + exámenes tipo examen'],
     ['psicotecnicos', 'brain', 'Psicotécnicos', 'Series, cálculo, atención y memoria'],
-    ['temario', 'marker', 'Temario oficial', 'Lo esencial de cada tema, por página'],
+    ['temario', 'marker', 'Temario oficial', 'Buscador de referencias del temario'],
   ]);
 };
 

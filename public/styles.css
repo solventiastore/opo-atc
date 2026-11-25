@@ -543,3 +543,17 @@ h2.sub svg{width:18px;height:18px;color:var(--cyan)}
 details>summary.btn{list-style:none;cursor:pointer}
 details>summary.btn::-webkit-details-marker{display:none}
 #plansBox .plans{margin-top:8px}
+
+/* Temario oficial: buscador de referencias */
+.search.big{max-width:none}
+.search.big input{font-size:17px;padding:14px 16px 14px 44px}
+.search.big svg{left:15px;width:19px;height:19px}
+.tref{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin:10px 0}
+body.light .tref{background:#fff;border-color:rgba(15,23,42,.06);box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px -18px rgba(15,23,42,.2)}
+.trefh{display:flex;align-items:center;gap:10px;justify-content:space-between;margin-bottom:8px}
+.trefh b{font-size:14.5px}
+.tref ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.tref li{position:relative;padding-left:16px;line-height:1.5;font-size:15px}
+.tref li::before{content:"";position:absolute;left:2px;top:.62em;width:5px;height:5px;border-radius:50%;background:var(--muted)}
+.tref mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
+.empty .chips .chip{font-size:13px}
