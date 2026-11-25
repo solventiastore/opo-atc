@@ -100,7 +100,7 @@ function viewRegister(q) {
       ${c.invite ? `<p class="muted small">De momento el acceso es solo por invitación: necesitas un código de acceso. Cada código sirve para una sola cuenta.</p>` : ''}
       ${c.google && !c.invite ? `<a class="btn-google" href="/api/auth/google">${G} Continuar con Google</a><p class="tiny-note">Con Google te pediremos igualmente tus datos en el siguiente paso.</p><div class="or"><span>o con tu email</span></div>` : ''}
       <form id="f" novalidate autocomplete="on">
-        ${c.invite ? `<label>Código de acceso</label><input id="inv" placeholder="ATC-XXXX-XXXX" autocapitalize="characters" value="${esc(q.codigo || '')}" required>` : ''}
+        ${c.invite ? `<label>Código de acceso</label><input id="inv" placeholder="ATC-XXXX-XXXX" autocapitalize="characters" value="${esc(q.codigo || '')}">` : ''}
         <div class="g2"><div><label>Nombre</label><input id="nm" autocomplete="given-name" required></div><div><label>Apellidos</label><input id="sn" autocomplete="family-name" required></div></div>
         <label>Email</label><input id="em" type="email" autocomplete="email" required>
         <label>Repite el email</label><input id="em2" type="email" autocomplete="off" required onpaste="return false">
@@ -114,7 +114,6 @@ function viewRegister(q) {
     mountCaptcha(c.captcha);
     $('#f').onsubmit = async e => { e.preventDefault(); const b = $('#f button'); $('#er').textContent = '';
       const v = { name: $('#nm').value, surname: $('#sn').value, email: $('#em').value, email2: $('#em2').value, birth: $('#bd').value, source: $('#src').value, pass: $('#pw').value, invite: $('#inv')?.value || '', terms: $('#tc').checked, marketing: $('#mk').checked, plan: q.plan };
-      if (c.invite && !v.invite.trim()) { $('#er').textContent = 'Escribe tu código de acceso'; return; }
       if (v.email.trim().toLowerCase() !== v.email2.trim().toLowerCase()) { $('#er').textContent = 'Los dos emails no coinciden'; return; }
       if (!v.terms) { $('#er').textContent = 'Debes aceptar los términos y la política de privacidad'; return; }
       if (c.captcha) { v.captcha = window.grecaptcha ? window.grecaptcha.getResponse(capWidget) : ''; if (!v.captcha) { $('#er').textContent = 'Marca la casilla «No soy un robot»'; return; } }
