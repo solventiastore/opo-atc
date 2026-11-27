@@ -310,8 +310,21 @@ const P = {
     P._tasks = list; P._sig = sig; P.byKey = Object.fromEntries(list.map(t => [t.key, t]));
     return list;
   },
-  get(key) { P.tasks(); return P.byKey[key] || P.recurring(key); },
+  get(key) { P.tasks(); return P.byKey[key] || P.recurring(key) || P.review(key); },
+  // Repasos 1·3·7 como tareas de Hoy toca
+  review(key) {
+    const m = /^r137:(.+):([137])$/.exec(key || ''); if (!m) return null;
+    const e = S.study.find(x => x.id === m[1]); if (!e) return null; const rk = +m[2];
+    return { key, k: 'r137', t: e.topic, rk, e, ids: e.ids, due: addDays(e.d, rk), mins: Math.max(3, Math.ceil(e.ids.length * NOM_Q * Pace.fq()) + 2) };
+  },
+  reviewsFor(ds) {
+    if (ds !== ymd()) return [];
+    const keys = dueReviews().map(x => `r137:${x.e.id}:${x.k}`);
+    S.study.forEach(e => [1, 3, 7].forEach(k => { if (e.done?.[k] && ymd(e.done[k]) === ds) keys.push(`r137:${e.id}:${k}`); }));
+    return [...new Set(keys)];
+  },
   done(key) {
+    if (/^r137:/.test(key)) { const r = P.review(key); return !!(r && r.e.done?.[r.rk]); }
     if (S.pd[key]?.v) return true;
     const t = P.get(key); if (!t) return false;
     if (t.k === 'res') { for (let p = t.a; p <= t.b; p++) if (!S.rd[t.t + ':' + p]?.v) return false; return true; }
@@ -378,6 +391,7 @@ const P = {
     if (P.isFinal(ds)) { out.push(`d:${ds}:sim`, `d:${ds}:fall`); }
     if (has('ingles')) out.push(`d:${ds}:eng`);
     if (has('psico')) out.push(`d:${ds}:psico`);
+    out.push(...P.reviewsFor(ds));
     if (ds >= ymd() && Ciclo.pool().length) out.push(`d:${ds}:ciclo`);
     return out;
   },
@@ -644,6 +658,7 @@ function taskCard(it, day) {
   } else if (it.k === 'eng') { title = 'Inglés'; desc = `${it.mins} min · preguntas tipo examen con la regla explicada`; actions = `<a class="btn sm" href="#/ingles">${icon('globe')} Practicar</a>`; }
   else if (it.k === 'psico') { title = 'Psicotécnicos'; desc = `${it.mins} min · series, cálculo, atención y memoria`; actions = `<a class="btn sm" href="#/psicotecnicos">${icon('brain')} Practicar</a>`; }
   else if (it.k === 'sim') { title = 'Simulacro de examen'; desc = '50 preguntas · 50 min · −0,33 por fallo'; actions = `<a class="btn sm" href="#/examenes">${icon('exam')} Hacer simulacro</a>`; }
+  else if (it.k === 'r137') { title = `Repaso día ${it.rk} · ${tname(it.t)}`; desc = `${it.ids.length} preguntas de lo que estudiaste el ${fmtDate(it.e.d, { day: 'numeric', month: 'long' })}${it.e.label ? ' (' + esc(it.e.label) + ')' : ''}`; actions = `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Hacer repaso</button>`; if (!P.done(it.key) && it.due < ymd()) desc += ' · <b>atrasado</b>'; }
   else if (it.k === 'ciclo') { title = 'Repaso de temas anteriores'; desc = '20 preguntas de lo que ya pasó el repaso 1·3·7, en orden desde lo primero que estudiaste'; actions = `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Hacer repaso</button>`; }
   else if (it.k === 'fall') { title = 'Falladas y repasos pendientes'; desc = `${pendingFails().length} falladas · ${dueReviews().length} repasos 1·3·7`; actions = `<a class="btn sm" href="#/falladas">${icon('x')} Repasar</a>`; }
   const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast && !it.d ? '<span class="pill amber">recolocado</span>' : '');
@@ -653,6 +668,7 @@ function taskCard(it, day) {
 function bindTasks(items, back) {
   $$('[data-tick]').forEach(b => b.onclick = () => {
     const key = b.dataset.tick, it = items.find(i => i.key === key), nv = !P.done(key);
+    if (it.k === 'r137') { it.e.done = Object.assign({}, it.e.done, { [it.rk]: nv ? now() : 0 }); if (!nv) delete it.e.done[it.rk]; it.e.u = now(); save(); return render(); }
     P.setDone(key, nv);
     if (nv && it.k === 'res') { const ids = markRead(it.t, it.a, it.b); if (ids.length) toast(`${ids.length} preguntas de estas páginas al repaso 1·3·7`); }
     if (!nv && it.k === 'res') { for (let p = it.a; p <= it.b; p++) S.rd[it.t + ':' + p] = { v: 0, u: now() }; save(); }
@@ -660,6 +676,7 @@ function bindTasks(items, back) {
   });
   $$('[data-q]').forEach(b => b.onclick = () => {
     const it = items.find(i => i.key === b.dataset.q);
+    if (it.k === 'r137') return startQuiz({ title: `Repaso día ${it.rk} · ${tname(it.t)}`, list: shuffle(it.ids), back, onFinish: z => { if (z.i >= z.list.length) { it.e.done = Object.assign({}, it.e.done, { [it.rk]: now() }); it.e.u = now(); save(); } } });
     if (it.k === 'ciclo') { const ids = Ciclo.next(); if (!ids.length) return toast('Aún no hay temas que hayan pasado el repaso 1·3·7'); return startQuiz({ title: 'Repaso de temas anteriores', list: ids, back, onFinish: z => { Ciclo.advance(Math.min(z.i, ids.length)); if (z.i >= ids.length) P.setDone(it.key, true); } }); }
     startQuiz({ title: `${tname(it.t)} · ${itemLabel(it)}`, list: it.ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
   });
@@ -669,7 +686,7 @@ const taskMins = items => items.reduce((a, i) => a + (i.mins || 0), 0);
 const TASK_GROUPS = [
   { id: 'res', title: 'Estudiar', sub: 'Páginas del resumen', ic: 'book', cls: 'g-res', ks: ['res'] },
   { id: 'q', title: 'Tests de cuestionario', sub: 'Preguntas de lo que estudias', ic: 'layers', cls: 'g-q', ks: ['qp', 'q'] },
-  { id: 'rep', title: 'Repasos', sub: 'Lo que ya estudiaste', ic: 'repeat', cls: 'g-rep', ks: ['ciclo', 'fall', 'sim'] },
+  { id: 'rep', title: 'Repasos', sub: 'Repaso 1·3·7 y lo que ya estudiaste', ic: 'repeat', cls: 'g-rep', ks: ['r137', 'ciclo', 'fall', 'sim'] },
   { id: 'eng', title: 'Inglés', sub: 'Tipo examen, con la regla explicada', ic: 'globe', cls: 'g-eng', ks: ['eng'] },
   { id: 'psico', title: 'Psicotécnicos', sub: 'Series, cálculo, atención y memoria', ic: 'brain', cls: 'g-psico', ks: ['psico'] },
 ];
@@ -737,10 +754,10 @@ function planDays(ctx) {
   const v = PV.v || 'semana', tf = PV.t || 'all';
   const anchor = PV.a && PV.a >= ctx.from && PV.a <= end ? PV.a : t;
   const monday = d => addDays(d, -((dow(d) + 6) % 7));
-  const DAILY = ['eng', 'psico', 'ciclo', 'sim', 'fall'];
+  const DAILY = ['eng', 'psico', 'ciclo', 'sim', 'fall', 'r137'];
   const topicsIn = TOPICS.filter(x => ctx.dates.some(d => itemsFor(d).some(i => i.t === x.id)));
   const keep = i => tf === 'all' || (tf === 'diario' ? DAILY.includes(i.k) : i.t === tf && !DAILY.includes(i.k));
-  const label = i => i.k === 'res' ? (i.b !== i.a ? `págs. ${i.a}–${i.b}` : `pág. ${i.a}`) : i.k === 'qp' ? `${i.ids.length} preg.` : i.k === 'q' ? `preg. ${i.a}–${i.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', ciclo: 'Repaso anterior', sim: 'Simulacro', fall: 'Falladas' }[i.k] || '');
+  const label = i => i.k === 'res' ? (i.b !== i.a ? `págs. ${i.a}–${i.b}` : `pág. ${i.a}`) : i.k === 'qp' ? `${i.ids.length} preg.` : i.k === 'q' ? `preg. ${i.a}–${i.b}` : i.k === 'r137' ? `Repaso día ${i.rk}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', ciclo: 'Repaso anterior', sim: 'Simulacro', fall: 'Falladas' }[i.k] || '');
   const state = (i, d) => P.done(i.key) ? 'done' : d < t ? 'miss' : d === t ? 'today' : 'fut';
   const ic = { eng: 'globe', psico: 'brain', ciclo: 'repeat', sim: 'exam', fall: 'x' };
   const chip = (i, d) => `<span class="ptask ${state(i, d)}" style="--tc:${TOP[i.t]?.c || '#64748b'}" title="${esc(tname(i.t) + ' · ' + label(i))}"><i>${TOP[i.t] ? 'T' + TOP[i.t].n : icon(ic[i.k] || 'star')}</i><span>${esc(label(i))}</span>${P.done(i.key) ? icon('check') : ''}</span>`;

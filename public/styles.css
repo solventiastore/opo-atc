@@ -651,4 +651,4 @@ button.hs{cursor:pointer;font:inherit}
 .tgh em{font-style:normal;font-size:12.5px;font-weight:700;color:var(--gc);background:color-mix(in srgb,var(--gc) 12%,transparent);padding:4px 10px;border-radius:99px;display:flex;align-items:center;gap:4px;white-space:nowrap}
 .tgh em svg{width:13px;height:13px}
 .g-res{--gc:#0891b2}.g-q{--gc:#2563eb}.g-rep{--gc:#7c3aed}.g-eng{--gc:#059669}.g-psico{--gc:#d97706}
-.g-eng .tbadge,.g-psico .tbadge,.g-rep .tbadge{display:none}
+.g-eng .tbadge,.g-psico .tbadge{display:none}
