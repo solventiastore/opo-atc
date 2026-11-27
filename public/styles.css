@@ -652,3 +652,17 @@ button.hs{cursor:pointer;font:inherit}
 .tgh em svg{width:13px;height:13px}
 .g-res{--gc:#0891b2}.g-q{--gc:#2563eb}.g-rep{--gc:#7c3aed}.g-eng{--gc:#059669}.g-psico{--gc:#d97706}
 .g-eng .tbadge,.g-psico .tbadge{display:none}
+
+/* Psicotécnicos: preguntas con imagen y tests en hoja */
+.qimg{display:block;max-width:100%;height:auto;margin:6px auto 10px;border-radius:10px;background:#fff}
+.sheetpg{padding:12px}
+.sheetimg{display:block;width:100%;height:auto;border-radius:8px;background:#fff;margin:6px 0}
+.sheetans{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
+.sq{display:flex;align-items:center;gap:4px}
+.sq b{min-width:26px;text-align:right;font:700 13px var(--mono);color:var(--muted);margin-right:2px}
+.bub{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line2);background:transparent;font:700 12.5px var(--mono);color:var(--ink2);cursor:pointer}
+.bub.sel{background:var(--grad);border-color:transparent;color:#fff}
+.bub.good{background:var(--ok);border-color:var(--ok);color:#fff}
+.bub.bad{background:var(--ko);border-color:var(--ko);color:#fff}
+.bub:disabled{cursor:default}
+.psyb b{font-size:15.5px}

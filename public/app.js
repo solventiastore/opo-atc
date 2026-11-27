@@ -78,6 +78,8 @@ const Q = {};
 D.q.forEach(x => { x.kind = 'cuest'; Q[x.id] = x; });
 D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
 (D.en || []).forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
+const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []);
+PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', src: b.name + ' · nº ' + x.n }; }));
 (D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
 function materialize(q) {
   if (q.sub !== 'words' || q.o) return q;
@@ -489,7 +491,7 @@ function updateChrome(r) {
 /* ---------- Router ---------- */
 const routes = {};
 let QZ = null, EXZ = null, timerH;
-const busy = () => (QZ && !QZ.finished) || (EXZ && !EXZ.done) || (typeof PZ !== 'undefined' && PZ && !PZ.done && location.hash.startsWith('#/psicotecnicos/'));
+const busy = () => (QZ && !QZ.finished) || (EXZ && !EXZ.done) || (typeof PSH !== 'undefined' && PSH && !PSH.done && location.hash.includes('/hoja/')) || (typeof PZ !== 'undefined' && PZ && !PZ.done && location.hash.startsWith('#/psicotecnicos/'));
 function parseHash() {
   const h = location.hash.replace(/^#\/?/, ''); const [path, qs] = h.split('?');
   const parts = path.split('/').map(decodeURIComponent); const q = Object.fromEntries(new URLSearchParams(qs || ''));
@@ -571,9 +573,9 @@ function renderQuiz(anim) {
       <span class="pill ok">✓ ${z.ok}</span><span class="pill ko">✗ ${z.ko}</span></div>
     <div class="card ${done && !ok && anim ? 'shake' : ''}">
       <div class="qmeta">${z.isRe ? `<span class="pill amber">${icon('repeat')} Repetición</span>` : ''}${qMeta(q)}</div>
-      <div class="qtext">${esc(q.q)}</div>
-      ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
-      ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + ': ' + esc(q.o[q.a])}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
+      ${q.q ? `<div class="qtext">${esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="Pregunta ${esc(q.n || '')}" loading="eager">` : ''}
+      ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${o.length === 1 ? '' : esc(o)}</span></button>`).join('')}
+      ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + (q.o[q.a].length === 1 ? '' : ': ' + esc(q.o[q.a]))}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
         ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en el resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
     </div>
     <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>
@@ -1138,7 +1140,7 @@ function renderExam() {
   const nAns = Object.keys(z.ans).length;
   app(`<div class="qtop"><span class="small muted" style="flex:1">${esc(z.label)} · <span class="mono">${z.i + 1}/${z.ids.length}</span></span><span class="timer" id="timer">${mmss(z.end - now())}</span></div>
   <div class="bar"><i style="width:${pct(nAns, z.ids.length)}%"></i></div>
-  <div class="card"><div class="qtext">${esc(q.q)}</div>
+  <div class="card">${q.q ? `<div class="qtext">${esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="">` : ''}
   ${q.o.map((o, i) => `<button class="opt ${z.ans[q.id] === i ? 'sel' : ''}" data-i="${i}"><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
   <div class="row" style="margin-top:6px"><button class="btn ghost sm" id="prev" ${z.i ? '' : 'disabled'}>${icon('chevL')}</button><button class="btn ghost sm" id="clr">Dejar en blanco</button><span class="spacer"></span><button class="btn ghost sm" id="nxt" ${z.i < z.ids.length - 1 ? '' : 'disabled'}>${icon('chevR')}</button></div></div>
   <div class="navgrid">${z.ids.map((id, i) => `<button class="${z.ans[id] != null ? 'ans' : ''} ${i === z.i ? 'cur' : ''}" data-g="${i}">${i + 1}</button>`).join('')}</div>
@@ -1237,13 +1239,51 @@ let PZ = null;
 function psyStat(k) { return S.psy?.[k] || { n: 0, ok: 0 }; }
 function psyRecord(k, ok) { S.psy = S.psy || {}; const r = Object.assign({ n: 0, ok: 0 }, S.psy[k]); r.n++; if (ok) r.ok++; r.u = now(); S.psy[k] = r; save(); }
 routes['psicotecnicos'] = (args) => {
+  if (args[0] !== 'hoja') PSH = null;
   if (!has('psico')) return locked('psico', 'Psicotécnicos', 'Los psicotécnicos están en el plan Teoría + Inglés + Psicotécnicos: series numéricas y de letras, cálculo, atención y memoria, infinitos y cronometrados.');
+  if (args[0] === 'hoja') return psySheet(args[1]);
   if (args[0] && (PSY[args[0]] || args[0] === 'mix')) { PZ = { k: args[0], i: 0, n: args[0] === 'mix' ? 30 : 15, ok: 0, t0: now(), limit: args[0] === 'mix' ? 15 * 60 : 0 }; return psyNext(); }
   PZ = null;
-  app(`${head('Practicar', 'Psicotécnicos', 'Ejercicios generados al momento: nunca se acaban ni se repiten igual. Haz unos minutos cada día; la velocidad se entrena.')}
+  app(`${head('Estudiar', 'Psicotécnicos', 'Tests de psicotécnicos con su solución oficial, tests completos en hoja y ejercicios generados que no se acaban. Haz unos minutos cada día: la velocidad se entrena.')}
   <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
+  ${PSYB.length ? `<h2>Tests de psicotécnicos</h2><p class="small muted" style="margin-top:-6px">Pregunta a pregunta, con la solución oficial. Las que falles vuelven en Falladas.</p>
+  <div class="grid g2">${PSYB.map(b => { const ids = b.items.map(x => x.id); const seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
+    return `<div class="card flat psyb"><div class="row"><div style="flex:1;min-width:0"><b>${esc(b.name)}</b><div class="small muted">${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}</div></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${b.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${b.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div></div>`; }).join('')}</div>` : ''}
+  ${PSYS.length ? `<h2>Tests completos en hoja</h2><p class="small muted" style="margin-top:-6px">El test tal cual, con su hoja de respuestas y tiempo. Al terminar se corrige.</p>
+  <div class="grid g2">${PSYS.map(t => { const r = S.psy?.['sheet:' + t.id]; const n = t.pages.reduce((a, p) => a + p.qs.length, 0);
+    return `<a class="card flat" href="#/psicotecnicos/hoja/${t.id}" style="color:inherit"><div class="row"><div style="flex:1"><b>${esc(t.name)}</b><div class="small muted">${n} preguntas · ${t.mins} min${t.key ? '' : ' · sin solución oficial'}</div></div>${icon('chevR', 'chev')}</div>${r ? `<div class="small muted" style="margin-top:8px">Último: ${r.last} · mejor: ${r.best}</div>` : ''}</a>`; }).join('')}</div>` : ''}
+  <h2>Ejercicios generados</h2>
   <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
+  $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYB.find(x => x.id === b.dataset.pb); let ids = bk.items.map(x => x.id);
+    if (b.dataset.m === 'rnd') ids = shuffle(ids); else { const k = ids.findIndex(id => !rec(id).n); if (k > 0) ids = ids.slice(k).concat(ids.slice(0, k)); }
+    startQuiz({ title: bk.name, list: ids, back: '#/psicotecnicos' }); });
 };
+// Test completo en hoja: páginas originales + hoja de respuestas, cronómetro y corrección
+let PSH = null;
+function psySheet(id) {
+  const t = PSYS.find(x => x.id === id); if (!t) { location.hash = '#/psicotecnicos'; return; }
+  if (!PSH || PSH.id !== id) PSH = { id, ans: {}, t0: now(), done: false };
+  const z = PSH, L5 = 'ABCDE'.slice(0, t.opts), total = t.pages.reduce((a, p) => a + p.qs.length, 0);
+  const pen = t.penalty ?? 1 / (t.opts - 1);
+  const res = () => { let ok = 0, ko = 0; for (let n = 1; n <= total; n++) { const a = z.ans[n]; if (a == null || !t.key) continue; a === t.key[n - 1] ? ok++ : ko++; } return { ok, ko, blank: total - ok - ko, net: Math.round((ok - ko * pen) * 100) / 100 }; };
+  const bubble = n => `<div class="sq"><b>${n}</b>${[...L5].map(l => { const sel = z.ans[n] === l, good = z.done && t.key && t.key[n - 1] === l; return `<button class="bub${sel ? ' sel' : ''}${z.done ? (good ? ' good' : sel ? ' bad' : '') : ''}" data-n="${n}" data-l="${l}" ${z.done ? 'disabled' : ''}>${l}</button>`; }).join('')}</div>`;
+  const r = z.done ? res() : null;
+  app(`<div class="qtop"><a class="btn ghost sm" href="#/psicotecnicos">${icon('chevL')}</a><span class="small muted" style="flex:1">${esc(t.name)} · ${Object.keys(z.ans).length}/${total} respondidas</span>${z.done ? '' : `<span class="timer" id="shT"></span>`}</div>
+    ${z.done ? `<div class="card hl row" style="gap:18px">${t.key ? ring(pct(r.ok, total), 84, 8) : ''}<div><div style="font-weight:800;font-size:18px">${t.key ? `${r.ok} aciertos · ${r.ko} fallos · ${r.blank} en blanco` : 'Test terminado'}</div>
+      <div class="small muted">${t.key ? `Nota neta: ${r.net} de ${total} (cada fallo resta ${String(Math.round(pen * 100) / 100).replace('.', ',')})` : 'Este test no trae solución oficial: compara tus respuestas con las imágenes.'} · ${Math.round((z.end - z.t0) / 60000)} min</div></div>
+      <span class="spacer"></span><button class="btn sec sm" id="again">${icon('repeat')} Repetir</button></div>` : `<p class="small muted">Marca tus respuestas debajo de cada página. Cuando termines, pulsa «Corregir». Tiempo orientativo: ${t.mins} min.</p>`}
+    ${t.support ? `<details class="card flat"><summary style="cursor:pointer;font-weight:700">Material de apoyo (desplegados)</summary>${t.support.map(im => `<img class="sheetimg" src="${im}" alt="" loading="lazy">`).join('')}</details>` : ''}
+    ${t.pages.map(p => `<div class="card sheetpg"><img class="sheetimg" src="${p.img}" alt="" loading="lazy">${p.qs.length ? `<div class="sheetans">${p.qs.map(bubble).join('')}</div>` : ''}</div>`).join('')}
+    ${z.done ? '' : `<div class="qactions"><button class="btn block" id="fin">${icon('check')} Corregir</button></div>`}`);
+  $$('.bub').forEach(b => b.onclick = () => { const n = +b.dataset.n; z.ans[n] = z.ans[n] === b.dataset.l ? undefined : b.dataset.l; if (z.ans[n] === undefined) delete z.ans[n];
+    $$(`.bub[data-n="${n}"]`).forEach(x => x.classList.toggle('sel', x.dataset.l === z.ans[n])); $('.qtop .muted').textContent = `${t.name} · ${Object.keys(z.ans).length}/${total} respondidas`; });
+  const fin = $('#fin'); if (fin) fin.onclick = () => { if (Object.keys(z.ans).length < total && !confirm('Hay preguntas sin responder. ¿Corregir igualmente?')) return;
+    z.done = true; z.end = now(); const rr = res(); S.psy = S.psy || {}; const k = 'sheet:' + id, old = S.psy[k];
+    S.psy[k] = { last: t.key ? `${rr.net}/${total}` : 'hecho', best: t.key ? (old && parseFloat(old.best) > rr.net ? old.best : `${rr.net}/${total}`) : 'hecho', u: now() }; save(); window.scrollTo(0, 0); psySheet(id); };
+  const ag = $('#again'); if (ag) ag.onclick = () => { PSH = null; psySheet(id); };
+  if (!z.done) { const el = $('#shT'); const tick = () => { if (PSH !== z || z.done || !document.body.contains(el)) return; const s2 = Math.round((now() - z.t0) / 1000); el.textContent = `${Math.floor(s2 / 60)}:${String(s2 % 60).padStart(2, '0')}`; setTimeout(tick, 1000); }; tick(); }
+}
 function psyNext() {
   const z = PZ; if (!z) return;
   if (z.i >= z.n || (z.limit && (now() - z.t0) / 1000 > z.limit)) return psyEnd();
