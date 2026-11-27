@@ -358,6 +358,11 @@ const P = {
     const late = P.overdue(); const rest = P.tasks().filter(x => !P.done(x.key) && !todayK.includes(x.key) && !late.includes(x.key));
     const sch = P.spread(rest, addDays(t, 1)); sch[t] = todayK; return sch;
   },
+  // Recalcular desde hoy: el día 0 pasa a ser hoy (lo hecho sigue hecho; lo atrasado deja de contar como acumulado)
+  restartToday() {
+    const t = ymd(); S.plan = S.plan || {}; S.plan.cfg = Object.assign(P.cfg(), { start: t }); S.plan.u = now();
+    if (S.ps) delete S.ps[t]; P._sig = ''; save(true);
+  },
   adelantar() {
     const sch = P.schedule(), t = ymd(); const next = Object.keys(sch).filter(d => d > t && sch[d].length).sort()[0];
     if (!next) return 0; S.ps[t].k = [...S.ps[t].k, ...sch[next]]; S.ps[t].u = now(); save(); return sch[next].length;
@@ -600,7 +605,7 @@ routes[''] = () => {
   const prio = TOPICS.filter(t => t.id !== 'entorno');
   app(`${head(fmtDate(ymd(), { weekday: 'long', day: 'numeric', month: 'long' }), `${hi}, ${esc((SESS.name || '').split(' ')[0] || 'piloto')}`, 'Tu torre de control para la oposición a controlador de ENAIRE.')}
   <div class="card planhome"><div class="row" style="margin-bottom:2px"><div style="flex:1;min-width:200px"><div class="tiny">Tu plan de estudio</div></div>
-    <a class="btn sm" href="#/plan">${icon('grid')} Ver mi plan</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar</a></div>
+    <a class="btn sm" href="#/plan">${icon('grid')} Ver mi plan</a><button class="btn ghost sm" id="restart" title="El día 0 pasa a ser hoy">${icon('refresh')} Recalcular desde hoy</button><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar</a></div>
     ${examCountdown()}${planSummary(P.stats(), P.cfg())}</div>
   <div class="grid g4" style="margin-top:16px">
     <a class="kpi" href="#/stats"><div class="ic c-cyan">${icon('target')}</div><div class="tiny">Preguntas</div><div class="v">${Object.values(S.q).filter(r => r.n).length}</div><div class="s">respondidas en total</div></a>
@@ -619,6 +624,7 @@ routes[''] = () => {
     <div class="bar"><i style="width:${pct(s.seen, s.scope)}%;background:${t.c}"></i></div><div class="row small muted"><span>${pct(s.seen, s.scope)}% hecho</span><span class="spacer"></span><span>${pct(s.ok, s.seen)}% acierto</span></div></a>`; }).join('')}</div>
 `);
   bindExamDate();
+  const rs = $('#restart'); if (rs) rs.onclick = () => { P.restartToday(); toast('Plan recalculado: hoy es tu día 0'); render(); };
 };
 
 /* ---------- Hoy toca ---------- */
@@ -686,13 +692,14 @@ routes['hoy'] = (args, q) => {
   app(`${head(fmtDate(day, { weekday: 'long', day: 'numeric', month: 'long' }) + (isToday ? ' · hoy' : ''), isToday ? 'Hoy toca' : isPast ? 'Lo que tocaba' : 'Lo que toca', isToday ? 'Tu plan se recalcula solo: lo que no hagas pasa a los días siguientes y lo que adelantes te libera días.' : isPast ? 'Lo que no hiciste ese día ya está recolocado en los siguientes.' : 'Puedes adelantar estas tareas: márcalas al hacerlas y el plan se recalcula.', nav)}
   <div class="card flat row" style="gap:16px">${ring(pct(doneN, items.length || 1), 64, 7, items.length ? doneN + '/' + items.length : '—')}<div style="flex:1"><div style="font-weight:650">${off ? 'Día libre: descansa 😌' : day >= P.examDate() ? 'Día del examen ✈ ¡Mucha suerte!' : items.length ? `${items.length} tareas${mins ? ` · ~${mins >= 60 ? (Math.round(mins / 6) / 10).toString().replace('.', ',') + ' h' : Math.round(mins) + ' min'} pendientes` : ' · ¡todo hecho!'}` : 'Sin temario nuevo: repasos y falladas'}${fin && !off ? ' · <span class="pill cyan">repaso final</span>' : ''}</div>
     <div class="small muted">Quedan ${st.left} tareas de temario · examen el ${fmtDate(P.examDate(), { day: 'numeric', month: 'long' })}</div></div><a class="btn ghost sm" href="#/plan">${icon('grid')} Mi plan</a></div>
-  ${items.some(i => i.late) ? `<h2 class="sub">${icon('alert')} Acumulado para ponerte al día <span class="pill amber">${items.filter(i => i.late && !P.done(i.key)).length}</span></h2><p class="small muted" style="margin:-6px 0 8px">Lo que tocaba en días anteriores y aún no has hecho. Hazlo primero y vuelves a ir al día.</p>${items.filter(i => i.late).map(it => taskCard(it, day)).join('')}<h2 class="sub">${icon('sun')} Lo de hoy</h2>` : ''}
+  ${items.some(i => i.late) ? `<h2 class="sub">${icon('alert')} Acumulado para ponerte al día <span class="pill amber">${items.filter(i => i.late && !P.done(i.key)).length}</span></h2><div class="row" style="margin:-6px 0 8px"><p class="small muted" style="margin:0;flex:1;min-width:220px">Lo que tocaba en días anteriores y aún no has hecho. Hazlo primero y vuelves a ir al día, o empieza de nuevo desde hoy.</p><button class="btn ghost sm" id="restart">${icon('refresh')} Recalcular desde hoy</button></div>${items.filter(i => i.late).map(it => taskCard(it, day)).join('')}<h2 class="sub">${icon('sun')} Lo de hoy</h2>` : ''}
   ${taskGroups(items.filter(i => !i.late), day) || (off ? '' : `<div class="card empty">${icon('repeat')}<div>No hay temario este día. Aprovecha para repasos 1·3·7 y falladas.</div></div>`)}
   ${isToday && nextN && !off ? `<div class="card ${doneN === items.length ? 'hl' : 'flat'} row"><div style="flex:1"><b>${doneN === items.length && items.length ? '¡Día completado! ' : ''}¿Te animas con lo siguiente?</b><div class="small muted">${nextN} tareas del ${fmtDate(nextDay)}. Si las haces hoy, el resto del plan se recoloca.</div></div><button class="btn ${doneN === items.length ? '' : 'sec'}" id="adel">${icon('chevR')} Adelantar</button></div>` : ''}
   <div class="row" style="margin-top:14px"><a class="btn ghost sm" href="#/repaso">${icon('repeat')} Repasos 1·3·7 (${dueReviews().length})</a><a class="btn ghost sm" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a></div>`);
   $$('[data-f]').forEach(b => b.onclick = () => { location.hash = '#/hoy?f=' + b.dataset.f; });
   const ad = $('#adel'); if (ad) ad.onclick = () => { const n = P.adelantar(); toast(n ? 'Añadido a hoy. El plan se ha recolocado.' : 'No hay más tareas'); render(); };
   bindTasks(items, back);
+  const rs = $('#restart'); if (rs) rs.onclick = () => { P.restartToday(); toast('Plan recalculado: hoy es tu día 0'); render(); };
 };
 
 /* ---------- Mi plan ---------- */
@@ -772,7 +779,7 @@ function planDays(ctx) {
 }
 routes['plan'] = () => {
   const t = ymd(); const st = P.stats(); const c = P.cfg();
-  const from = [c.start, ...Object.keys(S.ps || {})].sort()[0] < t ? [c.start, ...Object.keys(S.ps || {})].sort()[0] : t; const end = P.examDate();
+  const from = c.start && c.start < t ? c.start : t; const end = P.examDate();
   const dates = []; for (let d = from; d <= end; d = addDays(d, 1)) dates.push(d);
   const cls = (it, d) => P.done(it.key) ? 'c-done' : d < t ? 'c-miss' : d === t ? 'c-today' : 'c-fut';
   const cache = {}; const itemsFor = d => cache[d] || (cache[d] = d === end ? [] : P.itemsFor(d));
@@ -783,7 +790,7 @@ routes['plan'] = () => {
     if (P.isOff(d)) return `<tr class="orow"><th>${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</th><td colspan="${PLAN_COLS.length}">Día libre</td></tr>`;
     const cells = PLAN_COLS.map(([k, tp]) => { const cc = its.filter(i => k === 'x' ? ['eng', 'psico', 'sim', 'fall', 'ciclo'].includes(i.k) : k === 'q' ? (i.k === 'q' || i.k === 'qp') && i.t === tp : i.k === k && i.t === tp); return `<td>${cc.map(i => `<span class="pc ${cls(i, d)}">${esc(k === 'q' ? (i.k === 'qp' ? i.ids.length + ' preg.' : 'nº ' + i.a + '–' + i.b) : k === 'x' ? itemLabel(i).replace('Repaso de temas anteriores', 'Repaso') : 'págs. ' + i.a + (i.b !== i.a ? '–' + i.b : ''))}</span>`).join('')}</td>`; }).join('');
     return `<tr class="${d === t ? 'trow' : ''}"><th><a href="#/hoy?f=${d}">${fmtDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</a></th>${cells}</tr>`; }).join('');
-  app(`${head('Seguimiento', 'Mi plan', 'Tu plan día a día: qué páginas estudiar y qué preguntas hacer cada día. Lo que no haces se recoloca y lo que adelantas te libera días.', `<a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a>`)}
+  app(`${head('Seguimiento', 'Mi plan', 'Tu plan día a día: qué páginas estudiar y qué preguntas hacer cada día. Lo que no haces se recoloca y lo que adelantas te libera días.', `<div class="row"><button class="btn sec" id="restart">${icon('refresh')} Recalcular desde hoy</button><a class="btn" href="#/bienvenida?edit=1">${icon('gear')} Cambiar mi plan</a></div>`)}
   <div class="card">${examCountdown()}</div>
   ${planSummary(st, c)}
   <div class="bar ok" style="height:10px;margin:14px 0"><i style="width:${pct(st.done, st.total)}%"></i></div>
@@ -795,6 +802,7 @@ routes['plan'] = () => {
   bindExamDate();
   const ctx = { t, end, from, dates, itemsFor }; planDays(ctx);
   $$('[data-day]').forEach(b => b.onclick = () => { PV.v = 'dia'; PV.a = b.dataset.day; localStorage.setItem('opo_planview', JSON.stringify(PV)); planDays(ctx); $('#pday').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  const rs = $('#restart'); if (rs) rs.onclick = () => { P.restartToday(); toast('Plan recalculado: hoy es tu día 0'); render(); };
 };
 
 /* ---------- Bienvenida y configuración del plan ---------- */
@@ -841,7 +849,7 @@ routes['bienvenida'] = (args, q) => {
   if (c.known == null) c.known = c.examDate ? 1 : 0;
   app(`<div class="wizard"><div class="wbar"><i style="width:${pct(WZ.step, N - 1)}%"></i></div><div class="card wcard">${steps[WZ.step]()}
     <div class="row wnav">${WZ.step > (WZ.edit ? 1 : 0) ? `<button class="btn ghost" id="wb">${icon('chevL')} Atrás</button>` : WZ.edit ? `<a class="btn ghost" href="#/plan">Cancelar</a>` : ''}<span class="spacer"></span>
-    ${WZ.step < N - 1 ? `<button class="btn" id="wn">${WZ.step === 0 ? 'Empezar' : 'Siguiente'} ${icon('chevR')}</button>` : `<button class="btn" id="wsave">${icon('check')} ${WZ.edit ? 'Guardar y recalcular' : 'Crear mi plan'}</button>`}</div><div class="err" id="werr"></div></div></div>`);
+    ${WZ.step < N - 1 ? `<button class="btn" id="wn">${WZ.step === 0 ? 'Empezar' : 'Siguiente'} ${icon('chevR')}</button>` : `<button class="btn" id="wsave">${icon('check')} ${WZ.edit ? 'Guardar y recalcular desde hoy' : 'Crear mi plan'}</button>`}</div><div class="err" id="werr"></div></div></div>`);
   $$('.chip[data-n]').forEach(b => b.onclick = () => { const n = b.dataset.n, v = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v;
     if (b.dataset.m === '1') { const arr = new Set(c[n] || []); arr.has(v) ? arr.delete(v) : arr.add(v); c[n] = [...arr]; } else c[n] = v; render(); });
   const ex = $('#wexd'); if (ex) ex.onchange = ex.onblur = () => { if (/^\d{4}-\d{2}-\d{2}$/.test(ex.value)) c.examDate = ex.value; };
@@ -852,10 +860,10 @@ routes['bienvenida'] = (args, q) => {
     if (WZ.step === 3 && (c.off || []).length >= 7) { $('#werr').textContent = 'Deja al menos un día de estudio'; return; }
     WZ.step++; render(); };
   const sv = $('#wsave'); if (sv) sv.onclick = () => {
-    c.start = WZ.edit ? (S.plan.cfg.start || ymd()) : ymd(); if (c.known == 0) c.examDate = '';
+    c.start = ymd(); if (c.known == 0) c.examDate = '';
     S.plan = { cfg: c, u: now() }; S.settings.examDate = c.examDate || addDays(c.start, c.weeks * 7);
-    const t = ymd(); Object.keys(S.ps || {}).forEach(d => { if (d >= t) delete S.ps[d]; });
-    P._sig = ''; save(true); WZ = null; toast(edit ? 'Plan recalculado' : '¡Tu plan está listo!'); location.hash = '#/hoy';
+    const t = ymd(); if (S.ps) delete S.ps[t];
+    P._sig = ''; save(true); WZ = null; toast(edit ? 'Plan recalculado desde hoy' : '¡Tu plan está listo!'); location.hash = '#/hoy';
   };
 };
 
@@ -1488,8 +1496,13 @@ function boot() {
   QZ = null; EXZ = null; clearInterval(timerH);
   if (!SESS) { location.reload(); return; }
   loadState(); shell();
-  if (!S.plan?.cfg && !location.hash.startsWith('#/bienvenida')) location.hash = '#/bienvenida';
-  render(); sync();
+  if (S.plan?.cfg) { render(); sync(); return; }
+  $('#app').innerHTML = '<div class="card empty">Cargando tu plan…</div>';
+  Promise.race([sync(), new Promise(r => setTimeout(r, 6000))]).finally(() => {
+    if (!S.plan?.cfg && !location.hash.startsWith('#/bienvenida')) location.hash = '#/bienvenida';
+    else if (S.plan?.cfg && location.hash.startsWith('#/bienvenida') && !location.hash.includes('edit')) location.hash = '#/';
+    render();
+  });
 }
 boot();
 })();
