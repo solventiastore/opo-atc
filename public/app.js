@@ -209,8 +209,8 @@ function poolFor(topics, opts = {}) {
 function record(id, ok) {
   const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[id]); const first = !r.n;
   r.n++; r.t = now(); r.last = ok ? 1 : 0; r.u = now();
-  if (ok) { r.ok++; if (r.pend) { r.po = (r.po || 0) + 1; if (r.po >= 2) { r.pend = false; r.po = 0; } else r.due = now() + 3 * DAY; } }
-  else { r.ko++; r.pend = true; r.po = 0; r.due = now() + DAY; }
+  if (ok) { r.ok++; if (r.pend) { const st = failStage(r); if (st.due <= ymd()) { r.fd = st.fd; r.fs = st.fs + 1; if (r.fs >= F137.length) { r.pend = false; r.fs = 0; } else r.due = dayTs(addDays(r.fd, F137[r.fs])); } } }
+  else { r.ko++; failNow(r); }
   S.q[id] = r; save(); return first;
 }
 function addStudy(dateStr, topic, ids, label) {
@@ -227,6 +227,12 @@ function dueReviews() {
   for (const e of S.study) for (const k of [1, 3, 7]) { if (e.done?.[k]) continue; const due = addDays(e.d, k); if (due <= t) out.push({ e, k, due }); break; }
   return out.sort((a, b) => a.due.localeCompare(b.due));
 }
+const F137 = [1, 3, 7];
+const dayTs = ds => new Date(ds + 'T00:00:00').getTime();
+// Fallada: vuelve 1, 3 y 7 días después del fallo. Si la aciertas cuando le toca pasa a la siguiente; a los 7 días acertada, dominada.
+function failNow(r) { r.pend = true; r.fd = ymd(); r.fs = 0; r.po = 0; r.due = dayTs(addDays(r.fd, 1)); }
+function failStage(r) { const fd = r.fd || ymd((r.due || now()) - DAY), fs = Math.min(r.fs || 0, F137.length - 1); return { fd, fs, k: F137[fs], due: addDays(fd, F137[fs]) }; }
+const dueFails = (ds = ymd()) => Object.entries(S.q).filter(([id, r]) => r.pend && Q[id] && failStage(r).due <= ds).map(([id]) => id);
 const pendingFails = () => Object.entries(S.q).filter(([id, r]) => r.pend && Q[id]).map(([id]) => id);
 function topicStats(t) {
   const qs = D.q.filter(q => q.t === t); const sc = qs;
@@ -348,6 +354,7 @@ const P = {
   done(key) {
     if (/^r137:/.test(key)) { const r = P.review(key); return !!(r && r.e.done?.[r.rk]); }
     if (S.pd[key]?.v) return true;
+    if (/:f137$/.test(key)) return !dueFails().length;
     const t = P.get(key); if (!t) return false;
     if (t.k === 'res') { for (let p = t.a; p <= t.b; p++) if (!S.rd[t.t + ':' + p]?.v) return false; return true; }
     if (t.ids) return t.ids.every(id => rec(id).n > 0);
@@ -405,7 +412,8 @@ const P = {
   // tareas diarias que no van en el temario (inglés, psicotécnicos, repaso final)
   recurring(key) {
     const m = /^d:(\d{4}-\d{2}-\d{2}):(\w+)$/.exec(key || ''); if (!m) return null; const c = P.cfg();
-    const mins = { eng: 20, psico: 20, sim: 70, fall: 40, ciclo: 15 }[m[2]]; if (mins == null) return null;
+    let mins = { eng: 20, psico: 20, sim: 70, fall: 40, ciclo: 15, f137: 0 }[m[2]]; if (mins == null) return null;
+    if (m[2] === 'f137') { const ids = dueFails(); return { key, d: m[1], k: 'f137', t: 'f137', ids, mins: Math.max(3, Math.ceil(ids.length * NOM_Q * Pace.fq()) + 1) }; }
     return { key, d: m[1], k: m[2], t: m[2], mins };
   },
   dailyFor(ds) {
@@ -414,6 +422,7 @@ const P = {
     if (has('ingles')) out.push(`d:${ds}:eng`);
     if (has('psico')) out.push(`d:${ds}:psico`);
     out.push(...P.reviewsFor(ds));
+    if (ds === ymd() && (dueFails().length || S.pd[`d:${ds}:f137`]?.v)) out.push(`d:${ds}:f137`);
     if (ds >= ymd() && Ciclo.pool().length) out.push(`d:${ds}:ciclo`);
     return out;
   },
@@ -434,7 +443,7 @@ const P = {
     return { total: all.length, done: done.length, left: pend.length, daysLeft: days.length, hoursLeft: Math.round(mins / 60), capHours: Math.round(cap / 60), ok: mins <= cap, finish, spare };
   },
 };
-const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'qp' ? `${it.ids.length} preg. (p. ${it.a}${it.b !== it.a ? '–' + it.b : ''})` : it.k === 'q' ? `nº ${it.a}–${it.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', sim: 'Simulacro', fall: 'Falladas', ciclo: 'Repaso de temas anteriores' }[it.k] || '');
+const itemLabel = it => it.k === 'res' ? `págs. ${it.a}${it.b !== it.a ? '–' + it.b : ''}` : it.k === 'qp' ? `${it.ids.length} preg. (p. ${it.a}${it.b !== it.a ? '–' + it.b : ''})` : it.k === 'q' ? `nº ${it.a}–${it.b}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', sim: 'Simulacro', fall: 'Falladas', f137: 'Falladas 1·3·7', ciclo: 'Repaso de temas anteriores' }[it.k] || '');
 
 /* ---------- Shell / navegación ---------- */
 const NAV = [
@@ -605,7 +614,7 @@ function renderQuiz(anim) {
   $('#flagBtn').onclick = () => {
     const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
     if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
-    else { r.pend = true; r.fl = 1; r.po = 0; r.due = now() + DAY; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
+    else { failNow(r); r.fl = 1; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
     r.u = now(); S.q[q.id] = r; save(); renderQuiz();
   };
   if (!anim) window.scrollTo(0, 0);
@@ -688,6 +697,7 @@ function taskCard(it, day) {
   else if (it.k === 'sim') { title = 'Simulacro de examen'; desc = '50 preguntas · 50 min · −0,33 por fallo'; actions = `<a class="btn sm" href="#/examenes">${icon('exam')} Hacer simulacro</a>`; }
   else if (it.k === 'r137') { title = `Repaso día ${it.rk} · ${tname(it.t)}`; desc = `${it.ids.length} preguntas de lo que estudiaste el ${fmtDate(it.e.d, { day: 'numeric', month: 'long' })}${it.e.label ? ' (' + esc(it.e.label) + ')' : ''}`; actions = `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Hacer repaso</button>`; if (!P.done(it.key) && it.due < ymd()) desc += ' · <b>atrasado</b>'; }
   else if (it.k === 'ciclo') { title = 'Repaso de temas anteriores'; desc = '20 preguntas de lo que ya pasó el repaso 1·3·7, en orden desde lo primero que estudiaste'; actions = `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Hacer repaso</button>`; }
+  else if (it.k === 'f137') { const c = { 1: 0, 3: 0, 7: 0 }; it.ids.forEach(id => c[failStage(S.q[id]).k]++); title = 'Falladas · repaso 1·3·7'; desc = it.ids.length ? `${it.ids.length} preguntas que fallaste: ` + [1, 3, 7].filter(k => c[k]).map(k => `${c[k]} de día ${k}`).join(' · ') : 'Hecho por hoy'; actions = it.ids.length ? `<button class="btn sm" data-q="${it.key}">${icon('repeat')} Repasar falladas</button>` : ''; }
   else if (it.k === 'fall') { title = 'Falladas y repasos pendientes'; desc = `${pendingFails().length} falladas · ${dueReviews().length} repasos 1·3·7`; actions = `<a class="btn sm" href="#/falladas">${icon('x')} Repasar</a>`; }
   const badge = d ? (on && on !== day ? `<span class="pill ok">hecho el ${fmtDate(on)}</span>` : '') : (isPast && !it.d ? '<span class="pill amber">recolocado</span>' : '');
   return `<div class="task ${d ? 'done' : ''}"><button class="tick" data-tick="${it.key}" aria-label="Hecho">${icon('check')}</button>${tbadge(it.t)}
@@ -705,6 +715,7 @@ function bindTasks(items, back) {
   $$('[data-q]').forEach(b => b.onclick = () => {
     const it = items.find(i => i.key === b.dataset.q);
     if (it.k === 'r137') return startQuiz({ title: `Repaso día ${it.rk} · ${tname(it.t)}`, list: shuffle(it.ids), back, onFinish: z => { if (z.i >= z.list.length) { it.e.done = Object.assign({}, it.e.done, { [it.rk]: now() }); it.e.u = now(); save(); } } });
+    if (it.k === 'f137') { const ids = dueFails(); if (!ids.length) return toast('No te toca ninguna fallada hoy'); return startQuiz({ title: 'Falladas · repaso 1·3·7', list: shuffle(ids), back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } }); }
     if (it.k === 'ciclo') { const ids = Ciclo.next(); if (!ids.length) return toast('Aún no hay temas que hayan pasado el repaso 1·3·7'); return startQuiz({ title: 'Repaso de temas anteriores', list: ids, back, onFinish: z => { Ciclo.advance(Math.min(z.i, ids.length)); if (z.i >= ids.length) P.setDone(it.key, true); } }); }
     startQuiz({ title: `${tname(it.t)} · ${itemLabel(it)}`, list: it.ids, studyTopic: it.t, back, onFinish: z => { if (z.i >= z.list.length) P.setDone(it.key, true); } });
   });
@@ -714,7 +725,7 @@ const taskMins = items => items.reduce((a, i) => a + (i.mins || 0), 0);
 const TASK_GROUPS = [
   { id: 'res', title: 'Estudiar', sub: 'Páginas del resumen', ic: 'book', cls: 'g-res', ks: ['res'] },
   { id: 'q', title: 'Tests de cuestionario', sub: 'Preguntas de lo que estudias', ic: 'layers', cls: 'g-q', ks: ['qp', 'q'] },
-  { id: 'rep', title: 'Repasos', sub: 'Repaso 1·3·7 y lo que ya estudiaste', ic: 'repeat', cls: 'g-rep', ks: ['r137', 'ciclo', 'fall', 'sim'] },
+  { id: 'rep', title: 'Repasos', sub: 'Repaso 1·3·7 y lo que ya estudiaste', ic: 'repeat', cls: 'g-rep', ks: ['r137', 'f137', 'ciclo', 'fall', 'sim'] },
   { id: 'eng', title: 'Inglés', sub: 'Tipo examen, con la regla explicada', ic: 'globe', cls: 'g-eng', ks: ['eng'] },
   { id: 'psico', title: 'Psicotécnicos', sub: 'Series, cálculo, atención y memoria', ic: 'brain', cls: 'g-psico', ks: ['psico'] },
 ];
@@ -782,12 +793,12 @@ function planDays(ctx) {
   const v = PV.v || 'semana', tf = PV.t || 'all';
   const anchor = PV.a && PV.a >= ctx.from && PV.a <= end ? PV.a : t;
   const monday = d => addDays(d, -((dow(d) + 6) % 7));
-  const DAILY = ['eng', 'psico', 'ciclo', 'sim', 'fall', 'r137'];
+  const DAILY = ['eng', 'psico', 'ciclo', 'sim', 'fall', 'r137', 'f137'];
   const topicsIn = TOPICS.filter(x => ctx.dates.some(d => itemsFor(d).some(i => i.t === x.id)));
   const keep = i => tf === 'all' || (tf === 'diario' ? DAILY.includes(i.k) : i.t === tf && !DAILY.includes(i.k));
-  const label = i => i.k === 'res' ? (i.b !== i.a ? `págs. ${i.a}–${i.b}` : `pág. ${i.a}`) : i.k === 'qp' ? `${i.ids.length} preg.` : i.k === 'q' ? `preg. ${i.a}–${i.b}` : i.k === 'r137' ? `Repaso día ${i.rk}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', ciclo: 'Repaso anterior', sim: 'Simulacro', fall: 'Falladas' }[i.k] || '');
+  const label = i => i.k === 'res' ? (i.b !== i.a ? `págs. ${i.a}–${i.b}` : `pág. ${i.a}`) : i.k === 'qp' ? `${i.ids.length} preg.` : i.k === 'q' ? `preg. ${i.a}–${i.b}` : i.k === 'r137' ? `Repaso día ${i.rk}` : ({ eng: 'Inglés', psico: 'Psicotécnicos', ciclo: 'Repaso anterior', sim: 'Simulacro', fall: 'Falladas', f137: 'Falladas 1·3·7' }[i.k] || '');
   const state = (i, d) => P.done(i.key) ? 'done' : d < t ? 'miss' : d === t ? 'today' : 'fut';
-  const ic = { eng: 'globe', psico: 'brain', ciclo: 'repeat', sim: 'exam', fall: 'x' };
+  const ic = { eng: 'globe', psico: 'brain', ciclo: 'repeat', sim: 'exam', fall: 'x', f137: 'x' };
   const chip = (i, d) => `<span class="ptask ${state(i, d)}" style="--tc:${TOP[i.t]?.c || '#64748b'}" title="${esc(tname(i.t) + ' · ' + label(i))}"><i>${TOP[i.t] ? 'T' + TOP[i.t].n : icon(ic[i.k] || 'star')}</i><span>${esc(label(i))}</span>${P.done(i.key) ? icon('check') : ''}</span>`;
   const dayCard = d => {
     const all = itemsFor(d), its = all.filter(keep), off = P.isOff(d), ex = d === end, dn = all.filter(i => P.done(i.key)).length;
@@ -1197,8 +1208,9 @@ routes['repaso'] = () => {
 routes['falladas'] = () => {
   const ids = Object.entries(S.q).filter(([id, r]) => (r.ko || r.fl) && Q[id]).map(([id]) => id); const pend = new Set(pendingFails());
   const groups = {}; ids.forEach(id => { const q = Q[id]; const g = q.kind === 'eng' ? 'eng' : q.t; (groups[g] = groups[g] || []).push(id); });
-  app(`${head('Practicar', 'Falladas', 'Todo lo que has fallado en cualquier sección. Sigue pendiente hasta que lo aciertes 2 veces seguidas, y vuelve solo a las demás secciones al día siguiente.')}
-  <div class="card hl row"><div><div class="v mono" style="font-size:30px;font-weight:800">${pend.size}</div><div class="small muted">pendientes · ${ids.length} falladas alguna vez</div></div><span class="spacer"></span><button class="btn" id="allP" ${pend.size ? '' : 'disabled'}>${icon('play')} Practicar pendientes</button></div>
+  const today = dueFails();
+  app(`${head('Practicar', 'Falladas', 'Lo que fallas vuelve 1, 3 y 7 días después del fallo (también en Hoy toca). Si la aciertas el día que le toca pasa al siguiente; tras acertarla a los 7 días queda dominada. Si la vuelves a fallar, empieza de nuevo.')}
+  <div class="card hl row"><div><div class="v mono" style="font-size:30px;font-weight:800">${today.length}</div><div class="small muted">te tocan hoy · ${pend.size} pendientes · ${ids.length} falladas alguna vez</div></div><span class="spacer"></span><button class="btn" id="todayF" ${today.length ? '' : 'disabled'}>${icon('play')} Repasar las de hoy</button><button class="btn ghost" id="allP" ${pend.size ? '' : 'disabled'}>Todas las pendientes</button></div>
   ${Object.entries(groups).map(([g, l]) => { const p = l.filter(i => pend.has(i)); return `<div class="card"><div class="row"><span style="width:10px;height:10px;border-radius:50%;background:${TOP[g]?.c || '#a78bfa'}"></span><b>${esc(tname(g))}</b><span class="spacer"></span><span class="small muted mono">${p.length}/${l.length}</span><button class="btn sec sm" data-g="${g}" ${p.length ? '' : 'disabled'}>Practicar</button><button class="btn ghost sm" data-s="${g}">Ver</button></div><div id="list-${g}"></div></div>`; }).join('') || `<div class="card empty">${icon('check')}<div>Todavía no has fallado nada.</div></div>`}
   ${ids.length ? `<h2>Todas las que has fallado alguna vez</h2>
   <p class="small muted" style="margin-top:-6px">Aquí siguen también las que ya dominas (las acertaste 2 veces seguidas y salieron de pendientes). Repásalas de vez en cuando para que no se olviden.</p>
@@ -1206,6 +1218,7 @@ routes['falladas'] = () => {
     <button class="btn sec" id="allEver">${icon('repeat')} Repasar todas</button><button class="btn ghost" id="hardEver" ${ids.some(id => S.q[id].ko >= 2) ? '' : 'disabled'}>${icon('flame')} Las que más fallo</button></div>
     ${Object.keys(groups).length > 1 ? `<div class="chips" style="margin-top:12px">${Object.entries(groups).map(([g, l]) => `<button class="chip" data-ever="${g}">${esc(tname(g))} · ${l.length}</button>`).join('')}</div>` : ''}</div>` : ''}
   ${ME.admin ? `<div class="card flat row"><span class="small muted">¿Quieres repasar las falladas guardadas?</span><span class="spacer"></span><a class="btn ghost sm" href="#/memorizar">Ir a Memorizar</a></div>` : ''}`);
+  const tf = $('#todayF'); if (tf) tf.onclick = () => startQuiz({ title: 'Falladas · repaso 1·3·7', list: shuffle(today.slice()), back: '#/falladas', onFinish: z => { if (z.i >= z.list.length) P.setDone(`d:${ymd()}:f137`, true); } });
   const ab = $('#allP'); if (ab) ab.onclick = () => startQuiz({ title: 'Falladas pendientes', list: shuffle([...pend]), back: '#/falladas' });
   const ae = $('#allEver'); if (ae) ae.onclick = () => startQuiz({ title: 'Todas las falladas alguna vez', list: shuffle(ids.slice()), back: '#/falladas' });
   const he = $('#hardEver'); if (he) he.onclick = () => startQuiz({ title: 'Las que más fallo', list: ids.filter(id => S.q[id].ko >= 2).sort((a, c) => S.q[c].ko - S.q[a].ko), back: '#/falladas' });
@@ -1213,7 +1226,7 @@ routes['falladas'] = () => {
   $$('[data-g]').forEach(b => b.onclick = () => startQuiz({ title: 'Falladas · ' + tname(b.dataset.g), list: shuffle(groups[b.dataset.g].filter(i => pend.has(i))), back: '#/falladas' }));
   $$('[data-s]').forEach(b => b.onclick = () => {
     const el = $('#list-' + b.dataset.s);
-    el.innerHTML = el.innerHTML ? '' : groups[b.dataset.s].sort((a, c) => S.q[c].ko - S.q[a].ko).map(id => { const q = materialize(Q[id]), r = S.q[id]; return `<div style="border-top:1px solid var(--line);padding:10px 0"><div class="small muted">${r.ko}✗ ${r.ok}✓ ${pend.has(id) ? '· <b class="c-ko">pendiente</b>' : ''}</div><div>${esc(q.q)}</div><div class="small c-ok">✓ ${L[q.a].toUpperCase()}) ${esc(q.o[q.a])}</div></div>`; }).join('');
+    el.innerHTML = el.innerHTML ? '' : groups[b.dataset.s].sort((a, c) => S.q[c].ko - S.q[a].ko).map(id => { const q = materialize(Q[id]), r = S.q[id]; return `<div style="border-top:1px solid var(--line);padding:10px 0"><div class="small muted">${r.ko}✗ ${r.ok}✓ ${pend.has(id) ? (st => `· <b class="c-ko">pendiente</b> · repaso día ${st.k} ${st.due <= ymd() ? '<b>hoy</b>' : 'el ' + fmtDate(st.due, { day: 'numeric', month: 'short' })}`)(failStage(r)) : '· dominada'}</div><div>${esc(q.q)}</div><div class="small c-ok">✓ ${L[q.a].toUpperCase()}) ${esc(q.o[q.a])}</div></div>`; }).join('');
   });
 };
 
