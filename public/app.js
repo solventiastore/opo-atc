@@ -80,7 +80,19 @@ D.q.forEach(x => { x.kind = 'cuest'; Q[x.id] = x; });
 D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
 (D.en || []).forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
 const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []);
-PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', src: b.name + ' · nº ' + x.n }; }));
+PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', c: x.c || 'otros', src: b.name + ' · pregunta ' + x.n }; }));
+// Tipos de psicotécnico (cada pregunta indica de qué test sale)
+const PSYT = [
+  { id: 'series', name: 'Series', d: 'Números y letras que siguen una regla' },
+  { id: 'calculo', name: 'Cálculo y problemas', d: 'Operaciones, porcentajes, ecuaciones y problemas' },
+  { id: 'verbal', name: 'Verbal', d: 'Sinónimos, antónimos, analogías y refranes' },
+  { id: 'logico', name: 'Razonamiento lógico', d: 'Premisas, parentescos, posiciones y condiciones' },
+  { id: 'espacial', name: 'Espacial', d: 'Cubos, piezas, figuras iguales al modelo y giros' },
+  { id: 'abstracto', name: 'Razonamiento abstracto', d: 'Series y matrices de figuras' },
+  { id: 'domino', name: 'Dominós', d: 'Qué ficha falta en la secuencia' },
+  { id: 'atencion', name: 'Atención y percepción', d: 'Contar, comparar y fijarse en los detalles' },
+];
+const psyByType = id => PSYB.flatMap(b => b.items).filter(x => (x.c || 'otros') === id).map(x => x.id);
 (D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
 // Opciones barajadas: cada vez que sale una pregunta, la buena cambia de letra.
 // No se barajan las preguntas cuyas opciones citan otras letras («A y B son correctas»), las de imagen ni las que explican con letras.
@@ -209,8 +221,8 @@ function poolFor(topics, opts = {}) {
 function record(id, ok) {
   const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[id]); const first = !r.n;
   r.n++; r.t = now(); r.last = ok ? 1 : 0; r.u = now();
-  if (ok) { r.ok++; if (r.pend) { const st = failStage(r); if (st.due <= ymd()) { r.fd = st.fd; r.fs = st.fs + 1; if (r.fs >= F137.length) { r.pend = false; r.fs = 0; } else r.due = dayTs(addDays(r.fd, F137[r.fs])); } } }
-  else { r.ko++; failNow(r); }
+  if (ok) { r.ok++; if (r.pend) { const st = failStage(r); if (st.due <= ymd()) { r.fd = st.fd; r.fs = st.fs + 1; if (r.fs >= failSteps(r).length) { r.pend = false; r.fs = 0; } else r.due = dayTs(addDays(r.fd, failSteps(r)[r.fs])); } } }
+  else { r.ko++; failNow(r, Q[id]?.kind === 'psy'); }
   S.q[id] = r; save(); return first;
 }
 function addStudy(dateStr, topic, ids, label) {
@@ -230,8 +242,10 @@ function dueReviews() {
 const F137 = [1, 3, 7];
 const dayTs = ds => new Date(ds + 'T00:00:00').getTime();
 // Fallada: vuelve 1, 3 y 7 días después del fallo. Si la aciertas cuando le toca pasa a la siguiente; a los 7 días acertada, dominada.
-function failNow(r) { r.pend = true; r.fd = ymd(); r.fs = 0; r.po = 0; r.due = dayTs(addDays(r.fd, 1)); }
-function failStage(r) { const fd = r.fd || ymd((r.due || now()) - DAY), fs = Math.min(r.fs || 0, F137.length - 1); return { fd, fs, k: F137[fs], due: addDays(fd, F137[fs]) }; }
+const failSteps = r => r.p7 ? [7] : F137;
+function failNow(r, psy) { r.pend = true; r.fd = ymd(); r.fs = 0; r.po = 0; if (psy) r.p7 = 1; else delete r.p7; r.due = dayTs(addDays(r.fd, failSteps(r)[0])); }
+function failStage(r) { const K = failSteps(r), fd = r.fd || ymd((r.due || now()) - DAY), fs = Math.min(r.fs || 0, K.length - 1); return { fd, fs, k: K[fs], due: addDays(fd, K[fs]) }; }
+const psyWaiting = id => { const r = S.q[id]; return !!(r?.pend && Q[id]?.kind === 'psy' && failStage(r).due > ymd()); };
 const dueFails = (ds = ymd()) => Object.entries(S.q).filter(([id, r]) => r.pend && Q[id] && failStage(r).due <= ds).map(([id]) => id);
 const pendingFails = () => Object.entries(S.q).filter(([id, r]) => r.pend && Q[id]).map(([id]) => id);
 function topicStats(t) {
@@ -569,7 +583,7 @@ function answer(idx) {
   ok ? QZ.ok++ : QZ.ko++;
   if (QZ.shown && q.kind !== 'eng' && document.visibilityState === 'visible') Pace.addQ((now() - QZ.shown) / 1000);
   const first = record(q.id, ok);
-  if (!ok && !QZ.isRe) QZ.requeue.push({ id: q.id, at: QZ.count });
+  if (!ok && !QZ.isRe && q.kind !== 'psy') QZ.requeue.push({ id: q.id, at: QZ.count });
   if (!ok && navigator.vibrate) navigator.vibrate(60);
   if (QZ.studyTopic && first && q.kind === 'cuest') addStudy(ymd(), q.t, [q.id]);
   renderQuiz(true);
@@ -586,9 +600,10 @@ function finishQuiz() {
 }
 function qMeta(q) {
   const r = rec(q.id); const b = [];
+  if (q.kind === 'psy') { const ty = PSYT.find(x => x.id === q.c); b.push(`${ty ? `<span class="pill violet">${esc(ty.name)}</span>` : ''}<span class="pill" title="Documento del que sale">${icon('book')} ${esc(q.src)}</span>`); }
   if (q.kind === 'cuest') b.push(`<span class="pill" style="color:${TOP[q.t]?.c}">${esc(TOP[q.t]?.short || q.t)} · nº ${esc(q.n)}</span>`);
   else if (q.kind === 'exam') b.push(`<span class="pill cyan">${icon('exam')} ${esc(q.src)} · nº ${q.n}</span><span class="pill">${esc(TOP[q.t]?.short || q.t)}</span>`);
-  else b.push(`<span class="pill violet">${esc(q.src)}</span>`);
+  else if (q.kind !== 'psy') b.push(`<span class="pill violet">${esc(q.src)}</span>`);
   if (q.rep) b.push(`<span class="pill amber">${icon('star')} Repetida en ${esc(q.rep.join(', '))}</span>`);
   if (r.n) b.push(`<span class="pill">${r.ok}✓ ${r.ko}✗</span>`);
   return b.join('');
@@ -614,7 +629,7 @@ function renderQuiz(anim) {
   $('#flagBtn').onclick = () => {
     const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
     if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
-    else { failNow(r); r.fl = 1; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
+    else { failNow(r, q.kind === 'psy'); r.fl = 1; if (q.kind === 'psy') toast('Marcada como fallada: vuelve dentro de 7 días'); else { if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); } }
     r.u = now(); S.q[q.id] = r; save(); renderQuiz();
   };
   if (!anim) window.scrollTo(0, 0);
@@ -1377,18 +1392,19 @@ routes['psicotecnicos'] = (args) => {
   PZ = null;
   app(`${head('Estudiar', 'Psicotécnicos', 'Tests de psicotécnicos con su solución oficial, tests completos en hoja y ejercicios generados que no se acaban. Haz unos minutos cada día: la velocidad se entrena.')}
   <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
-  ${PSYB.length ? `<h2>Tests de psicotécnicos</h2><p class="small muted" style="margin-top:-6px">Pregunta a pregunta, con la solución oficial. Las que falles vuelven en Falladas.</p>
-  <div class="grid g2">${PSYB.map(b => { const ids = b.items.map(x => x.id); const seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
-    return `<div class="card flat psyb"><div class="row"><div style="flex:1;min-width:0"><b>${esc(b.name)}</b><div class="small muted">${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}</div></div></div>
-      <div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${b.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${b.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div></div>`; }).join('')}</div>` : ''}
+  ${PSYB.length ? `<h2>Preguntas por tipo</h2><p class="small muted" style="margin-top:-6px">Preguntas reales de tests de psicotécnicos con su solución oficial. En cada pregunta verás de qué test sale. Si fallas una, no vuelve hasta dentro de 7 días.</p>
+  <div class="grid g2">${PSYT.map(ty => { const ids = psyByType(ty.id); if (!ids.length) return ''; const seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
+    return `<div class="card flat psyb"><div class="row"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b><div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:2px">${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}</div></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div></div>`; }).join('')}</div>` : ''}
   ${PSYS.length ? `<h2>Tests completos en hoja</h2><p class="small muted" style="margin-top:-6px">El test tal cual, con su hoja de respuestas y tiempo. Al terminar se corrige.</p>
   <div class="grid g2">${PSYS.map(t => { const r = S.psy?.['sheet:' + t.id]; const n = t.pages.reduce((a, p) => a + p.qs.length, 0);
     return `<a class="card flat" href="#/psicotecnicos/hoja/${t.id}" style="color:inherit"><div class="row"><div style="flex:1"><b>${esc(t.name)}</b><div class="small muted">${n} preguntas · ${t.mins} min${t.key ? '' : ' · sin solución oficial'}</div></div>${icon('chevR', 'chev')}</div>${r ? `<div class="small muted" style="margin-top:8px">Último: ${r.last} · mejor: ${r.best}</div>` : ''}</a>`; }).join('')}</div>` : ''}
   <h2>Ejercicios generados</h2>
   <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
-  $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYB.find(x => x.id === b.dataset.pb); let ids = bk.items.map(x => x.id);
+  $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYT.find(x => x.id === b.dataset.pb); let ids = psyByType(bk.id);
     if (b.dataset.m === 'rnd') ids = shuffle(ids); else { const k = ids.findIndex(id => !rec(id).n); if (k > 0) ids = ids.slice(k).concat(ids.slice(0, k)); }
-    startQuiz({ title: bk.name, list: ids, back: '#/psicotecnicos' }); });
+    const wait = ids.filter(psyWaiting).length; ids = ids.filter(id => !psyWaiting(id)); if (!ids.length) return toast('Todas las que quedan las fallaste hace menos de 7 días');
+    if (wait) toast(`${wait} falladas esperan a sus 7 días`); startQuiz({ title: bk.name, list: ids, back: '#/psicotecnicos' }); });
 };
 // Test completo en hoja: páginas originales + hoja de respuestas, cronómetro y corrección
 let PSH = null;

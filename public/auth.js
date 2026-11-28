@@ -6,7 +6,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SESS_KEY = 'opo_session', ME_KEY = 'opo_me';
-const VERSION = '20261128e';
+const VERSION = '20261128f';
 let SESS = null; try { SESS = JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); } catch (e) {}
 if (SESS && SESS.local) { SESS = null; localStorage.removeItem(SESS_KEY); }
 
