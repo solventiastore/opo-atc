@@ -83,14 +83,17 @@ const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []);
 PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', c: x.c || 'otros', src: b.name + ' · pregunta ' + x.n }; }));
 // Tipos de psicotécnico (cada pregunta indica de qué test sale)
 const PSYT = [
-  { id: 'series', name: 'Series', d: 'Números y letras que siguen una regla' },
-  { id: 'calculo', name: 'Cálculo y problemas', d: 'Operaciones, porcentajes, ecuaciones y problemas' },
-  { id: 'verbal', name: 'Verbal', d: 'Sinónimos, antónimos, analogías y refranes' },
+  // top: lo que más cae en el examen · low: lo que cae poco
+  { id: 'espacial', top: 1, name: 'Espacial', d: 'Figuras que giran, se pliegan o cambian de posición; cubos y piezas' },
+  { id: 'atencion', top: 1, name: 'Fatiga', d: 'Una página llena de números, letras o símbolos donde hay que encontrar o contar algo' },
+  { id: 'abstracto', top: 1, name: 'Abstracto', d: 'Series de figuras con una regla oculta: posiciones, colores y giros que se repiten' },
+  { id: 'tablas', top: 1, name: 'Tablas y gráficos', d: 'Datos administrativos: cálculos, porcentajes, reglas de tres y medias' },
+  { id: 'texto', top: 1, name: 'Texto largo', d: 'Un texto confuso de media página que enlaza varias ideas y 7 u 8 preguntas de lógica sobre él' },
+  { id: 'calculo', name: 'Cálculo y problemas', d: 'Operaciones, ecuaciones y problemas (los de cabezas y patas caen poco)' },
   { id: 'logico', name: 'Razonamiento lógico', d: 'Premisas, parentescos, posiciones y condiciones' },
-  { id: 'espacial', name: 'Espacial', d: 'Cubos, piezas, figuras iguales al modelo y giros' },
-  { id: 'abstracto', name: 'Razonamiento abstracto', d: 'Series y matrices de figuras' },
-  { id: 'domino', name: 'Dominós', d: 'Qué ficha falta en la secuencia' },
-  { id: 'atencion', name: 'Atención y percepción', d: 'Contar, comparar y fijarse en los detalles' },
+  { id: 'verbal', name: 'Verbal', d: 'Sinónimos, antónimos, analogías y refranes (ortografía y acentos caen poco)' },
+  { id: 'series', low: 1, name: 'Series numéricas', d: 'Números y letras que siguen una regla' },
+  { id: 'domino', low: 1, name: 'Dominós', d: 'Qué ficha falta en la secuencia' },
 ];
 const psyByType = id => PSYB.flatMap(b => b.items).filter(x => (x.c || 'otros') === id).map(x => x.id);
 (D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
@@ -1392,13 +1395,15 @@ routes['psicotecnicos'] = (args) => {
   PZ = null;
   app(`${head('Estudiar', 'Psicotécnicos', 'Tests de psicotécnicos con su solución oficial, tests completos en hoja y ejercicios generados que no se acaban. Haz unos minutos cada día: la velocidad se entrena.')}
   <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
-  ${PSYB.length ? `<h2>Preguntas por tipo</h2><p class="small muted" style="margin-top:-6px">Preguntas reales de tests de psicotécnicos con su solución oficial. En cada pregunta verás de qué test sale. Si fallas una, no vuelve hasta dentro de 7 días.</p>
-  <div class="grid g2">${PSYT.map(ty => { const ids = psyByType(ty.id); if (!ids.length) return ''; const seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
-    return `<div class="card flat psyb"><div class="row"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b><div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:2px">${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}</div></div></div>
-      <div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div></div>`; }).join('')}</div>` : ''}
+  ${PSYB.length ? (() => { const card = ty => { const ids = psyByType(ty.id), seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
+      return `<div class="card flat psyb ${ty.top ? 'psytop' : ''}"><div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b>${ty.top ? ' <span class="pill amber">Cae mucho</span>' : ty.low ? ' <span class="pill">Cae poco</span>' : ''}<div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:4px">${ids.length ? `${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}` : '<b>Aún no hay ejercicios cargados</b>'}</div></div></div>
+      ${ids.length ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div>` : ''}</div>`; };
+    return `<h2>Lo que más cae</h2><p class="small muted" style="margin-top:-6px">Preguntas reales de tests con su solución oficial. En cada pregunta verás de qué test sale. Si fallas una, no vuelve hasta dentro de 7 días.</p>
+    <div class="grid g2">${PSYT.filter(t => t.top).map(card).join('')}</div>
+    <h2>Resto de tipos</h2><div class="grid g2">${PSYT.filter(t => !t.top).map(card).join('')}</div>`; })() : ''}
   ${PSYS.length ? `<h2>Tests completos en hoja</h2><p class="small muted" style="margin-top:-6px">El test tal cual, con su hoja de respuestas y tiempo. Al terminar se corrige.</p>
   <div class="grid g2">${PSYS.map(t => { const r = S.psy?.['sheet:' + t.id]; const n = t.pages.reduce((a, p) => a + p.qs.length, 0);
-    return `<a class="card flat" href="#/psicotecnicos/hoja/${t.id}" style="color:inherit"><div class="row"><div style="flex:1"><b>${esc(t.name)}</b><div class="small muted">${n} preguntas · ${t.mins} min${t.key ? '' : ' · sin solución oficial'}</div></div>${icon('chevR', 'chev')}</div>${r ? `<div class="small muted" style="margin-top:8px">Último: ${r.last} · mejor: ${r.best}</div>` : ''}</a>`; }).join('')}</div>` : ''}
+    return `<a class="card flat" href="#/psicotecnicos/hoja/${t.id}" style="color:inherit"><div class="row"><div style="flex:1"><b>${esc(t.name)}</b>${({ ve: ' <span class="pill amber">Cae mucho · Espacial</span>', avi: ' <span class="pill amber">Cae mucho · Fatiga</span>' })[t.id] || ''}<div class="small muted">${n} preguntas · ${t.mins} min${t.key ? '' : ' · sin solución oficial'}</div></div>${icon('chevR', 'chev')}</div>${r ? `<div class="small muted" style="margin-top:8px">Último: ${r.last} · mejor: ${r.best}</div>` : ''}</a>`; }).join('')}</div>` : ''}
   <h2>Ejercicios generados</h2>
   <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
   $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYT.find(x => x.id === b.dataset.pb); let ids = psyByType(bk.id);

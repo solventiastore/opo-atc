@@ -708,3 +708,5 @@ body .prose mark.uh.c-p{background:rgba(244,114,182,.42);color:inherit}
 .flagbtn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .flagbtn.on{color:var(--ko);border-color:rgba(225,29,72,.35);background:rgba(225,29,72,.06)}
 @media(max-width:600px){.flagbtn span{display:none}}
+
+.psytop{border-color:rgba(245,158,11,.45);background:linear-gradient(180deg,rgba(245,158,11,.07),transparent 70%)}
