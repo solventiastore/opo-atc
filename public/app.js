@@ -605,7 +605,7 @@ function renderQuiz(anim) {
   $('#flagBtn').onclick = () => {
     const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
     if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
-    else { r.pend = true; r.po = 0; r.due = now() + DAY; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
+    else { r.pend = true; r.fl = 1; r.po = 0; r.due = now() + DAY; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
     r.u = now(); S.q[q.id] = r; save(); renderQuiz();
   };
   if (!anim) window.scrollTo(0, 0);
@@ -1195,13 +1195,21 @@ routes['repaso'] = () => {
 
 /* ---------- Falladas ---------- */
 routes['falladas'] = () => {
-  const ids = Object.entries(S.q).filter(([id, r]) => r.ko && Q[id]).map(([id]) => id); const pend = new Set(pendingFails());
+  const ids = Object.entries(S.q).filter(([id, r]) => (r.ko || r.fl) && Q[id]).map(([id]) => id); const pend = new Set(pendingFails());
   const groups = {}; ids.forEach(id => { const q = Q[id]; const g = q.kind === 'eng' ? 'eng' : q.t; (groups[g] = groups[g] || []).push(id); });
   app(`${head('Practicar', 'Falladas', 'Todo lo que has fallado en cualquier sección. Sigue pendiente hasta que lo aciertes 2 veces seguidas, y vuelve solo a las demás secciones al día siguiente.')}
   <div class="card hl row"><div><div class="v mono" style="font-size:30px;font-weight:800">${pend.size}</div><div class="small muted">pendientes · ${ids.length} falladas alguna vez</div></div><span class="spacer"></span><button class="btn" id="allP" ${pend.size ? '' : 'disabled'}>${icon('play')} Practicar pendientes</button></div>
   ${Object.entries(groups).map(([g, l]) => { const p = l.filter(i => pend.has(i)); return `<div class="card"><div class="row"><span style="width:10px;height:10px;border-radius:50%;background:${TOP[g]?.c || '#a78bfa'}"></span><b>${esc(tname(g))}</b><span class="spacer"></span><span class="small muted mono">${p.length}/${l.length}</span><button class="btn sec sm" data-g="${g}" ${p.length ? '' : 'disabled'}>Practicar</button><button class="btn ghost sm" data-s="${g}">Ver</button></div><div id="list-${g}"></div></div>`; }).join('') || `<div class="card empty">${icon('check')}<div>Todavía no has fallado nada.</div></div>`}
-  <div class="card flat row"><span class="small muted">¿Quieres repasar tu lista de falladas del documento?</span><span class="spacer"></span><a class="btn ghost sm" href="#/memorizar">Ir a Memorizar</a></div>`);
+  ${ids.length ? `<h2>Todas las que has fallado alguna vez</h2>
+  <p class="small muted" style="margin-top:-6px">Aquí siguen también las que ya dominas (las acertaste 2 veces seguidas y salieron de pendientes). Repásalas de vez en cuando para que no se olviden.</p>
+  <div class="card"><div class="row" style="gap:14px;flex-wrap:wrap"><div><div class="v mono" style="font-size:26px;font-weight:800">${ids.length}</div><div class="small muted">${ids.filter(id => !pend.has(id)).length} ya dominadas · ${ids.filter(id => S.q[id].ko >= 2).length} falladas 2 veces o más</div></div><span class="spacer"></span>
+    <button class="btn sec" id="allEver">${icon('repeat')} Repasar todas</button><button class="btn ghost" id="hardEver" ${ids.some(id => S.q[id].ko >= 2) ? '' : 'disabled'}>${icon('flame')} Las que más fallo</button></div>
+    ${Object.keys(groups).length > 1 ? `<div class="chips" style="margin-top:12px">${Object.entries(groups).map(([g, l]) => `<button class="chip" data-ever="${g}">${esc(tname(g))} · ${l.length}</button>`).join('')}</div>` : ''}</div>` : ''}
+  ${ME.admin ? `<div class="card flat row"><span class="small muted">¿Quieres repasar las falladas guardadas?</span><span class="spacer"></span><a class="btn ghost sm" href="#/memorizar">Ir a Memorizar</a></div>` : ''}`);
   const ab = $('#allP'); if (ab) ab.onclick = () => startQuiz({ title: 'Falladas pendientes', list: shuffle([...pend]), back: '#/falladas' });
+  const ae = $('#allEver'); if (ae) ae.onclick = () => startQuiz({ title: 'Todas las falladas alguna vez', list: shuffle(ids.slice()), back: '#/falladas' });
+  const he = $('#hardEver'); if (he) he.onclick = () => startQuiz({ title: 'Las que más fallo', list: ids.filter(id => S.q[id].ko >= 2).sort((a, c) => S.q[c].ko - S.q[a].ko), back: '#/falladas' });
+  $$('[data-ever]').forEach(b => b.onclick = () => startQuiz({ title: 'Falladas alguna vez · ' + tname(b.dataset.ever), list: shuffle(groups[b.dataset.ever].slice()), back: '#/falladas' }));
   $$('[data-g]').forEach(b => b.onclick = () => startQuiz({ title: 'Falladas · ' + tname(b.dataset.g), list: shuffle(groups[b.dataset.g].filter(i => pend.has(i))), back: '#/falladas' }));
   $$('[data-s]').forEach(b => b.onclick = () => {
     const el = $('#list-' + b.dataset.s);
