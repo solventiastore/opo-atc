@@ -103,13 +103,13 @@ const defaultSettings = () => ({
   penalty: 0.33, simMinutes: 50, examDate: '', planStart: '', planLen: 31,
   pages: { meteo: 20, ffhh: 20, carto: 14, nav: 18, aero: 8, fpl: 12, inst: 19, entorno: 3 }
 });
-const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, psy: {}, pace: { r: [], q: [] }, settings: defaultSettings() });
+const defaultState = () => ({ v: 2, q: {}, study: [], log: [], sims: [], ov: {}, pd: {}, rd: {}, ps: {}, psy: {}, hl: {}, pace: { r: [], q: [] }, settings: defaultSettings() });
 let S = defaultState();
 function loadState() {
   let s = null; try { s = JSON.parse(localStorage.getItem(stateKey()) || 'null'); } catch (e) {}
   S = Object.assign(defaultState(), s || {});
   S.settings = Object.assign(defaultSettings(), S.settings || {});
-  ['pd', 'rd', 'ov', 'q', 'ps', 'psy'].forEach(k => S[k] = S[k] || {});
+  ['pd', 'rd', 'ov', 'q', 'ps', 'psy', 'hl'].forEach(k => S[k] = S[k] || {});
   // migración desde la versión anterior (un solo dispositivo)
   if (!S.migrated) {
     for (const k of ['enaire_v1', 'opo_state_local']) {
@@ -130,7 +130,8 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 function mergeState(a, b) {
   if (!b) return a;
   a.ps = a.ps || {}; a.psy = a.psy || {};
-  for (const k of ['q', 'ov', 'pd', 'rd', 'ps', 'psy']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
+  a.hl = a.hl || {};
+  for (const k of ['q', 'ov', 'pd', 'rd', 'ps', 'psy', 'hl']) for (const [id, r] of Object.entries(b[k] || {})) if (!a[k][id] || (r.u || 0) > (a[k][id].u || 0)) a[k][id] = r;
   for (const k of ['study', 'log', 'sims']) {
     const m = new Map((a[k] || []).map(x => [x.id, x]));
     for (const x of (b[k] || [])) { const y = m.get(x.id); if (!y) m.set(x.id, x); else if ((x.u || 0) > (y.u || 0)) m.set(x.id, x); else if (k === 'study' && x.ids) { y.ids = [...new Set([...y.ids, ...x.ids])]; } }
@@ -887,6 +888,84 @@ routes['bienvenida'] = (args, q) => {
 };
 
 /* ---------- Resúmenes ---------- */
+/* ---------- Subrayados y notas en los resúmenes ---------- */
+const HL_COLORS = [['y', 'Amarillo'], ['g', 'Verde'], ['b', 'Azul'], ['p', 'Rosa']];
+const Hl = {
+  live: () => Object.entries(S.hl || {}).filter(([, h]) => !h.del),
+  texts(root) { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); const out = []; let n; while ((n = w.nextNode())) out.push(n); return out; },
+  offset(root, node, off) { const pre = document.createRange(); pre.setStart(root, 0); pre.setEnd(node, off); return pre.toString().length; },
+  wrap(root, start, end, id, c, note) {
+    let pos = 0;
+    for (const tn of Hl.texts(root)) {
+      const len = tn.nodeValue.length, a = Math.max(start, pos), b = Math.min(end, pos + len);
+      if (a < b) {
+        let mid = tn; if (a > pos) mid = tn.splitText(a - pos); if (b < pos + len) mid.splitText(b - a);
+        const m = document.createElement('mark'); m.className = 'uh c-' + c + (note ? ' has-note' : ''); m.dataset.h = id; mid.parentNode.insertBefore(m, mid); m.appendChild(mid);
+      }
+      pos += len; if (pos >= end) break;
+    }
+  },
+  paint(root) {
+    const key = root.dataset.hp; root.querySelectorAll('mark.uh').forEach(m => { const p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); p.normalize(); });
+    Hl.live().filter(([, h]) => h.k === key).sort((x, y) => x[1].s - y[1].s).forEach(([id, h]) => Hl.wrap(root, h.s, h.e, id, h.c, h.n));
+    const aside = $(`.notes[data-np="${key}"]`); if (!aside) return;
+    const notes = Hl.live().filter(([, h]) => h.k === key && h.n).sort((x, y) => x[1].s - y[1].s);
+    aside.innerHTML = notes.length ? `<div class="tiny" style="margin-bottom:8px">Tus notas</div>` + notes.map(([id, h]) => `<div class="note" data-nid="${id}"><div class="nq"><i class="dot c-${h.c}"></i>${esc(h.q.length > 70 ? h.q.slice(0, 70) + '…' : h.q)}</div><div class="nt">${esc(h.n).replace(/\n/g, '<br>')}</div></div>`).join('') : '';
+    aside.classList.toggle('empty', !notes.length);
+  },
+  save(id, h) { S.hl[id] = Object.assign({}, S.hl[id], h, { u: now() }); save(); },
+  menu: null,
+  close() { if (Hl.menu) { Hl.menu.remove(); Hl.menu = null; } },
+  open(x, y, html, bind) {
+    Hl.close(); const m = document.createElement('div'); m.className = 'hlmenu'; m.innerHTML = html; document.body.appendChild(m);
+    const r = m.getBoundingClientRect(); m.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width / 2)) + 'px'; m.style.top = Math.max(8, y - r.height - 10) + 'px';
+    Hl.menu = m; m.addEventListener('mousedown', e => { if (!e.target.closest('textarea')) e.preventDefault(); }); bind(m);
+  },
+  noteBox(id) {
+    const h = S.hl[id]; const mk = $(`mark.uh[data-h="${id}"]`); if (!mk) return; const r = mk.getBoundingClientRect();
+    Hl.open(r.left + r.width / 2, r.top, `<div class="hlnote"><div class="tiny">Nota sobre «${esc(h.q.length > 40 ? h.q.slice(0, 40) + '…' : h.q)}»</div><textarea rows="3" placeholder="Escribe tu nota…">${esc(h.n || '')}</textarea><div class="row" style="margin-top:6px"><button class="btn sm" data-a="ok">Guardar</button>${h.n ? '<button class="btn ghost sm" data-a="del">Borrar nota</button>' : ''}<span class="spacer"></span><button class="btn ghost sm" data-a="x">Cancelar</button></div></div>`, m => {
+      const ta = m.querySelector('textarea'); ta.focus();
+      m.querySelector('[data-a="ok"]').onclick = () => { Hl.save(id, { n: ta.value.trim() }); Hl.close(); Hl.repaint(); };
+      const d = m.querySelector('[data-a="del"]'); if (d) d.onclick = () => { Hl.save(id, { n: '' }); Hl.close(); Hl.repaint(); };
+      m.querySelector('[data-a="x"]').onclick = () => Hl.close();
+    });
+  },
+  colors: (cur) => HL_COLORS.map(([c, l]) => `<button class="sw c-${c}${cur === c ? ' on' : ''}" data-c="${c}" title="${l}" aria-label="Subrayar en ${l.toLowerCase()}"></button>`).join(''),
+  repaint() { $$('.hlable').forEach(Hl.paint); },
+  mount() {
+    Hl.repaint();
+    const onSel = () => {
+      const sel = getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      const rg = sel.getRangeAt(0); const root = (rg.commonAncestorContainer.nodeType === 1 ? rg.commonAncestorContainer : rg.commonAncestorContainer.parentNode).closest('.hlable'); if (!root) return;
+      let s0 = Hl.offset(root, rg.startContainer, rg.startOffset), e0 = Hl.offset(root, rg.endContainer, rg.endOffset);
+      const full = root.textContent, W = /[\p{L}\p{N}]/u;  // se amplía a palabras completas
+      while (s0 > 0 && W.test(full[s0 - 1] || '') && W.test(full[s0] || '')) s0--;
+      while (e0 < full.length && W.test(full[e0] || '') && W.test(full[e0 - 1] || '')) e0++;
+      while (s0 < e0 && /\s/.test(full[s0])) s0++; while (e0 > s0 && /\s/.test(full[e0 - 1])) e0--;
+      const txt = full.slice(s0, e0).trim();
+      if (e0 - s0 < 2 || !txt) return; const r = rg.getBoundingClientRect();
+      Hl.open(r.left + r.width / 2, r.top, `<div class="hlbar">${Hl.colors()}<span class="sep"></span><button class="ib" data-a="note" title="Subrayar y añadir nota">${icon('marker')}<span>Nota</span></button></div>`, m => {
+        const add = c => { const id = 'h' + now().toString(36) + Math.random().toString(36).slice(2, 6); Hl.save(id, { k: root.dataset.hp, s: s0, e: e0, c, q: txt.replace(/\s+/g, ' ') }); getSelection().removeAllRanges(); Hl.close(); Hl.paint(root); return id; };
+        m.querySelectorAll('[data-c]').forEach(b => b.onclick = () => add(b.dataset.c));
+        m.querySelector('[data-a="note"]').onclick = () => { const id = add('y'); Hl.noteBox(id); };
+      });
+    };
+    const app_ = $('#app');
+    app_.onmouseup = () => setTimeout(onSel, 10);
+    app_.ontouchend = () => setTimeout(onSel, 250);
+    app_.onclick = e => {
+      const nt = e.target.closest('.note'); if (nt) { const mk = $(`mark.uh[data-h="${nt.dataset.nid}"]`); if (mk) { mk.scrollIntoView({ block: 'center', behavior: 'smooth' }); mk.classList.add('flash'); setTimeout(() => mk.classList.remove('flash'), 1200); } return; }
+      const mk = e.target.closest('mark.uh'); if (!mk || !getSelection().isCollapsed) return;
+      const id = mk.dataset.h, h = S.hl[id]; const r = mk.getBoundingClientRect();
+      Hl.open(r.left + r.width / 2, r.top, `<div class="hlbar">${Hl.colors(h.c)}<span class="sep"></span><button class="ib" data-a="note">${icon('marker')}<span>${h.n ? 'Editar nota' : 'Nota'}</span></button><button class="ib" data-a="del" title="Quitar subrayado">${icon('x')}</button></div>`, m => {
+        m.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { Hl.save(id, { c: b.dataset.c }); Hl.close(); Hl.repaint(); });
+        m.querySelector('[data-a="note"]').onclick = () => Hl.noteBox(id);
+        m.querySelector('[data-a="del"]').onclick = () => { Hl.save(id, { del: 1 }); Hl.close(); Hl.repaint(); };
+      });
+    };
+    if (!Hl._doc) { Hl._doc = true; document.addEventListener('mousedown', e => { if (Hl.menu && !Hl.menu.contains(e.target)) Hl.close(); }); window.addEventListener('hashchange', () => Hl.close()); window.addEventListener('scroll', () => { if (Hl.menu && !Hl.menu.querySelector('textarea')) Hl.close(); }, { passive: true }); }
+  },
+};
 routes['resumenes'] = (args, q) => {
   const [t, p] = args;
   if (!t) {
@@ -908,12 +987,13 @@ routes['resumenes'] = (args, q) => {
   if (!allRead && (!READ || READ.key !== t + a + '-' + b)) READ = { key: t + a + '-' + b, from: now(), acc: 0 };
   app(`<div class="qtop"><a class="btn ghost sm" href="${q.task ? '#/hoy' : '#/resumenes/' + t}">${icon('chevL')}</a><span class="small muted" style="flex:1">${esc(x.name)} · ${v.bysec ? 'sección' : 'pág.'} ${a}${b !== a ? '–' + b : ''} de ${last}</span>${v.exact ? '' : '<span class="pill">aprox.</span>'}</div>
   ${pages.map(pg => `<div class="card"><div class="pagehead"><span class="pill" style="color:${x.c}">${v.bysec ? 'Sección' : 'Página'} ${pg.p}</span>${S.rd[t + ':' + pg.p]?.v ? `<span class="pill ok">${icon('check')} estudiada</span>` : ''}<span class="spacer"></span></div>
-    <div class="prose">${pg.h}</div></div>`).join('')}
+    <div class="rdwrap"><div class="prose hlable" data-hp="${t}:${pg.p}">${pg.h}</div><aside class="notes" data-np="${t}:${pg.p}"></aside></div></div>`).join('')}
   <div class="card flat row">${nq.length ? `<span class="small muted">${nq.length} preguntas del cuestionario salen de ${b !== a ? 'estas páginas' : 'esta página'}</span>` : ''}<span class="spacer"></span>
     ${nq.length ? `<button class="btn sec sm" id="prac">${icon('play')} Practicarlas</button>` : ''}<button class="btn sm" id="markRead" ${allRead && !q.task ? 'disabled' : ''}>${icon('check')} ${allRead ? 'Estudiado' : 'Marcar como estudiado'}</button></div>
   <div class="row" style="justify-content:space-between;margin-top:8px">${a > 1 ? `<a class="btn ghost" href="#/resumenes/${t}/${a - 1}">${icon('chevL')} Anterior</a>` : '<span></span>'}${b < last ? `<a class="btn ghost" href="#/resumenes/${t}/${b + 1}">Siguiente ${icon('chevR')}</a>` : ''}</div>`);
   const pr = $('#prac'); if (pr) pr.onclick = () => startQuiz({ title: `${x.short} · págs. ${a}–${b}`, list: nq, studyTopic: t, back: location.hash });
   $('#markRead').onclick = () => { if (READ && READ.key === t + a + '-' + b) { Pace.addRead(b - a + 1, readActive() / 60000); READ = null; } const ids = markRead(t, a, b); if (q.task) P.setDone(q.task, true); toast(ids.length ? `Hecho · ${ids.length} preguntas al repaso 1·3·7` : 'Marcado como estudiado'); if (q.task) location.hash = '#/hoy'; else render(); };
+  Hl.mount();
 };
 
 /* ---------- Memorizar ---------- */
