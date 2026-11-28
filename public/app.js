@@ -79,8 +79,10 @@ const Q = {};
 D.q.forEach(x => { x.kind = 'cuest'; Q[x.id] = x; });
 D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
 (D.en || []).forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
-const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []);
-PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', c: x.c || 'otros', src: b.name + ' · pregunta ' + x.n }; }));
+const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []); const PSYX = (R.psyTexts || []);
+// Texto largo: cada texto con sus preguntas (el texto se muestra encima de cada pregunta)
+if (PSYX.length) PSYB.push({ id: 'tl', name: 'Texto largo', items: PSYX.flatMap((t, i) => t.q.map((q, k) => ({ id: `psy-tl-${i}-${k}`, n: k + 1, tx: i, tt: t.t, ctx: t.x, c: 'texto', q: q.q, o: q.o, a: q.a, x: q.x }))) });
+PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', c: x.c || 'otros', ctx: x.ctx, tx: x.tx, tt: x.tt, src: x.ctx ? `Texto ${x.tx + 1}: ${x.tt} · pregunta ${x.n}` : b.name + ' · pregunta ' + x.n }; }));
 // Tipos de psicotécnico (cada pregunta indica de qué test sale)
 const PSYT = [
   // top: lo que más cae en el examen · low: lo que cae poco
@@ -601,6 +603,7 @@ function finishQuiz() {
     <p class="muted">${z.ok} aciertos · ${z.ko} fallos${z.ko ? ' · las falladas volverán a salir mañana y están en «Falladas»' : ''}</p>
     <div class="row" style="justify-content:center;margin-top:14px"><a class="btn" href="${z.back || '#/'}">Continuar</a>${z.ko ? '<a class="btn sec" href="#/falladas">Ver falladas</a>' : ''}</div></div>`);
 }
+let PASSAGE_OPEN = true;
 function qMeta(q) {
   const r = rec(q.id); const b = [];
   if (q.kind === 'psy') { const ty = PSYT.find(x => x.id === q.c); b.push(`${ty ? `<span class="pill violet">${esc(ty.name)}</span>` : ''}<span class="pill" title="Documento del que sale">${icon('book')} ${esc(q.src)}</span>`); }
@@ -620,6 +623,7 @@ function renderQuiz(anim) {
       <span class="pill ok">✓ ${z.ok}</span><span class="pill ko">✗ ${z.ko}</span></div>
     <div class="card ${done && !ok && anim ? 'shake' : ''}">
       <div class="qmeta">${z.isRe ? `<span class="pill amber">${icon('repeat')} Repetición</span>` : ''}${qMeta(q)}</div>
+      ${q.ctx ? `<details class="passage" ${PASSAGE_OPEN ? 'open' : ''}><summary>${icon('book')} Texto ${q.tx + 1}: ${esc(q.tt)}</summary><div class="ptext">${esc(q.ctx)}</div></details>` : ''}
       ${q.q ? `<div class="qtext">${esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="Pregunta ${esc(q.n || '')}" loading="eager">` : ''}
       ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${o.length === 1 ? '' : esc(o)}</span></button>`).join('')}
       ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + (q.o[q.a].length === 1 ? '' : ': ' + esc(q.o[q.a]))}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
@@ -629,6 +633,7 @@ function renderQuiz(anim) {
     <div class="kbd">Teclado: 1-9 o A-D para responder · Enter para seguir</div>`);
   $$('.opt').forEach(b => b.onclick = () => answer(+b.dataset.i));
   $('#nextBtn').onclick = nextQuestion; $('#endBtn').onclick = finishQuiz;
+  const pz = $('.passage'); if (pz) pz.ontoggle = () => { PASSAGE_OPEN = pz.open; };
   $('#flagBtn').onclick = () => {
     const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
     if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
@@ -1396,8 +1401,8 @@ routes['psicotecnicos'] = (args) => {
   app(`${head('Estudiar', 'Psicotécnicos', 'Tests de psicotécnicos con su solución oficial, tests completos en hoja y ejercicios generados que no se acaban. Haz unos minutos cada día: la velocidad se entrena.')}
   <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
   ${PSYB.length ? (() => { const card = ty => { const ids = psyByType(ty.id), seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
-      return `<div class="card flat psyb ${ty.top ? 'psytop' : ''}"><div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b>${ty.top ? ' <span class="pill amber">Cae mucho</span>' : ty.low ? ' <span class="pill">Cae poco</span>' : ''}<div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:4px">${ids.length ? `${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}` : '<b>Aún no hay ejercicios cargados</b>'}</div></div></div>
-      ${ids.length ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} Aleatorio</button></div>` : ''}</div>`; };
+      return `<div class="card flat psyb ${ty.top ? 'psytop' : ''}"><div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b>${ty.top ? ' <span class="pill amber">Cae mucho</span>' : ty.low ? ' <span class="pill">Cae poco</span>' : ''}<div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:4px">${ids.length ? `${ty.id === 'texto' ? PSYX.length + ' textos · ' : ''}${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}` : '<b>Aún no hay ejercicios cargados</b>'}</div></div></div>
+      ${ids.length ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${ty.id === 'texto' ? (seen ? 'Siguiente texto' : 'Empezar') : seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} ${ty.id === 'texto' ? 'Texto al azar' : 'Aleatorio'}</button></div>` : ''}</div>`; };
     return `<h2>Lo que más cae</h2><p class="small muted" style="margin-top:-6px">Preguntas reales de tests con su solución oficial. En cada pregunta verás de qué test sale. Si fallas una, no vuelve hasta dentro de 7 días.</p>
     <div class="grid g2">${PSYT.filter(t => t.top).map(card).join('')}</div>
     <h2>Resto de tipos</h2><div class="grid g2">${PSYT.filter(t => !t.top).map(card).join('')}</div>`; })() : ''}
@@ -1407,6 +1412,14 @@ routes['psicotecnicos'] = (args) => {
   <h2>Ejercicios generados</h2>
   <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
   $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYT.find(x => x.id === b.dataset.pb); let ids = psyByType(bk.id);
+    if (bk.id === 'texto') { // un texto completo, con sus preguntas en orden
+      const byT = {}; ids.forEach(id => (byT[Q[id].tx] = byT[Q[id].tx] || []).push(id));
+      const avail = Object.values(byT).map(l => l.filter(id => !psyWaiting(id))).filter(l => l.length);
+      if (!avail.length) return toast('Las preguntas que quedan las fallaste hace menos de 7 días');
+      const fresh = avail.filter(l => l.some(id => !rec(id).n));
+      const pick = b.dataset.m === 'rnd' ? avail[Math.floor(Math.random() * avail.length)] : (fresh[0] || avail[0]);
+      return startQuiz({ title: 'Texto largo · ' + Q[pick[0]].tt, list: pick, back: '#/psicotecnicos' });
+    }
     if (b.dataset.m === 'rnd') ids = shuffle(ids); else { const k = ids.findIndex(id => !rec(id).n); if (k > 0) ids = ids.slice(k).concat(ids.slice(0, k)); }
     const wait = ids.filter(psyWaiting).length; ids = ids.filter(id => !psyWaiting(id)); if (!ids.length) return toast('Todas las que quedan las fallaste hace menos de 7 días');
     if (wait) toast(`${wait} falladas esperan a sus 7 días`); startQuiz({ title: bk.name, list: ids, back: '#/psicotecnicos' }); });

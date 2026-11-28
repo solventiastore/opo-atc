@@ -710,3 +710,10 @@ body .prose mark.uh.c-p{background:rgba(244,114,182,.42);color:inherit}
 @media(max-width:600px){.flagbtn span{display:none}}
 
 .psytop{border-color:rgba(245,158,11,.45);background:linear-gradient(180deg,rgba(245,158,11,.07),transparent 70%)}
+
+.passage{border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,.06);margin:6px 0 14px}
+.passage summary{cursor:pointer;padding:10px 14px;font-weight:650;font-size:14px;display:flex;gap:8px;align-items:center;list-style:none}
+.passage summary::-webkit-details-marker{display:none}
+.passage .ptext{padding:0 16px 14px;font-size:15px;line-height:1.65;max-height:46vh;overflow:auto;text-align:justify}
+.passage summary svg{width:16px;height:16px;flex:none}
+@media(max-width:600px){.passage .ptext{max-height:38vh;font-size:14.5px;text-align:left}}
