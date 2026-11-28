@@ -81,6 +81,7 @@ D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
 (D.en || []).forEach(x => { x.kind = 'eng'; Q[x.id] = x; });
 const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []); const PSYX = (R.psyTexts || []);
 // Texto largo: cada texto con sus preguntas (el texto se muestra encima de cada pregunta)
+PSYS.filter(t => t.key && t.cats).forEach(t => { const items = []; t.pages.forEach(pg => pg.qs.forEach(n => items.push({ id: `psy-${t.id}-${String(n).padStart(2, '0')}`, n, img: pg.img, q: `Responde a la pregunta nº ${n} de la imagen`, o: 'ABCDE'.slice(0, t.opts).split(''), a: 'ABCDE'.indexOf(t.key[n - 1]), c: t.cats[n - 1] }))); PSYB.push({ id: t.id, name: t.name, items }); });
 if (PSYX.length) PSYB.push({ id: 'tl', name: 'Texto largo', items: PSYX.flatMap((t, i) => t.q.map((q, k) => ({ id: `psy-tl-${i}-${k}`, n: k + 1, tx: i, tt: t.t, ctx: t.x, c: 'texto', q: q.q, o: q.o, a: q.a, x: q.x }))) });
 PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', c: x.c || 'otros', ctx: x.ctx, tx: x.tx, tt: x.tt, src: x.ctx ? `Texto ${x.tx + 1}: ${x.tt} · pregunta ${x.n}` : b.name + ' · pregunta ' + x.n }; }));
 // Tipos de psicotécnico (cada pregunta indica de qué test sale)
@@ -96,7 +97,23 @@ const PSYT = [
   { id: 'verbal', name: 'Verbal', d: 'Sinónimos, antónimos, analogías y refranes (ortografía y acentos caen poco)' },
   { id: 'series', low: 1, name: 'Series numéricas', d: 'Números y letras que siguen una regla' },
   { id: 'domino', low: 1, name: 'Dominós', d: 'Qué ficha falta en la secuencia' },
+  { id: 'memoria', name: 'Memoria', d: 'Memoriza un tráfico durante 15 segundos y responde' },
 ];
+// ejercicios generados (ilimitados) que alimentan cada categoría
+const PSYGEN = { series: ['num', 'let'], calculo: ['calc'], atencion: ['aten'], memoria: ['mem'] };
+// segundos por pregunta en el simulacro de cada categoría
+const PSYSEC = { espacial: 50, atencion: 35, abstracto: 45, tablas: 75, texto: 50, calculo: 50, logico: 50, verbal: 25, series: 35, domino: 35 };
+let GENC = 0;
+function genQ(k, c) { const g = PSY[k].gen(); const id = `gen-${k}-${++GENC}`; Q[id] = { id, t: 'psico', kind: 'psy', gen: true, bank: 'gen', c, q: g.q, qhtml: true, o: g.o.map(String), a: g.a, r: g.why || '', src: 'Ejercicio generado · ' + PSY[k].name }; return id; }
+// orígenes de cada categoría y los que el usuario ha desmarcado (se guarda en este dispositivo)
+const psySrcs = c => { const m = {}; psyByType(c).forEach(id => { const b = Q[id].bank; m[b] = m[b] || { id: b, name: (PSYB.find(x => x.id === b) || {}).name || b, n: 0 }; m[b].n++; }); const l = Object.values(m); if (PSYGEN[c]) l.push({ id: 'gen', name: 'Ejercicios generados (ilimitados)', n: 0 }); return l; };
+const PSRC = (() => { try { return JSON.parse(localStorage.getItem('opo_psysrc') || '{}'); } catch { return {}; } })();
+const psyOff = c => PSRC[c] || [];
+const psyPool = c => psyByType(c).filter(id => !psyOff(c).includes(Q[id].bank));
+// tiempo por acierto: desde que aparece el ejercicio hasta que respondes
+function psyTime(c, ms, ok) { if (!c || !(ms > 0)) return; ms = Math.min(ms, 15 * 60e3); S.psy = S.psy || {}; const k = 't:' + c; const r = Object.assign({ n: 0, ok: 0, ms: 0, okms: 0 }, S.psy[k]); r.n++; r.ms += ms; if (ok) { r.ok++; r.okms += ms; } r.u = now(); S.psy[k] = r; save(); }
+const psyT = c => S.psy?.['t:' + c] || { n: 0, ok: 0, ms: 0, okms: 0 };
+const secs = ms => ms >= 60e3 ? `${Math.floor(ms / 60e3)} min ${Math.round(ms % 60e3 / 1000)} s` : `${(ms / 1000).toFixed(ms < 10e3 ? 1 : 0)} s`;
 const psyByType = id => PSYB.flatMap(b => b.items).filter(x => (x.c || 'otros') === id).map(x => x.id);
 (D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
 // Opciones barajadas: cada vez que sale una pregunta, la buena cambia de letra.
@@ -224,6 +241,7 @@ function poolFor(topics, opts = {}) {
     (pool === 'both' || (pool === 'cuest' ? q.kind === 'cuest' : q.kind === 'exam')));
 }
 function record(id, ok) {
+  if (Q[id]?.gen) return false;
   const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[id]); const first = !r.n;
   r.n++; r.t = now(); r.last = ok ? 1 : 0; r.u = now();
   if (ok) { r.ok++; if (r.pend) { const st = failStage(r); if (st.due <= ymd()) { r.fd = st.fd; r.fs = st.fs + 1; if (r.fs >= failSteps(r).length) { r.pend = false; r.fs = 0; } else r.due = dayTs(addDays(r.fd, failSteps(r)[r.fs])); } } }
@@ -587,6 +605,7 @@ function answer(idx) {
   const q = QZ.cur; QZ.chosen = idx; const ok = idx === q.a;
   ok ? QZ.ok++ : QZ.ko++;
   if (QZ.shown && q.kind !== 'eng' && document.visibilityState === 'visible') Pace.addQ((now() - QZ.shown) / 1000);
+  if (QZ.shown && q.kind === 'psy') psyTime(q.c, now() - QZ.shown, ok);
   const first = record(q.id, ok);
   if (!ok && !QZ.isRe && q.kind !== 'psy') QZ.requeue.push({ id: q.id, at: QZ.count });
   if (!ok && navigator.vibrate) navigator.vibrate(60);
@@ -624,17 +643,17 @@ function renderQuiz(anim) {
     <div class="card ${done && !ok && anim ? 'shake' : ''}">
       <div class="qmeta">${z.isRe ? `<span class="pill amber">${icon('repeat')} Repetición</span>` : ''}${qMeta(q)}</div>
       ${q.ctx ? `<details class="passage" ${PASSAGE_OPEN ? 'open' : ''}><summary>${icon('book')} Texto ${q.tx + 1}: ${esc(q.tt)}</summary><div class="ptext">${esc(q.ctx)}</div></details>` : ''}
-      ${q.q ? `<div class="qtext">${esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="Pregunta ${esc(q.n || '')}" loading="eager">` : ''}
+      ${q.q ? `<div class="qtext">${q.qhtml ? q.q : esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="Pregunta ${esc(q.n || '')}" loading="eager">` : ''}
       ${q.o.map((o, i) => `<button class="opt ${done ? (i === q.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${o.length === 1 ? '' : esc(o)}</span></button>`).join('')}
       ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + (q.o[q.a].length === 1 ? '' : ': ' + esc(q.o[q.a]))}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
         ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en el resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
     </div>
-    <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost flagbtn ${S.q[q.id]?.pend ? 'on' : ''}" id="flagBtn" title="Marcar como fallada: te la volveré a preguntar">${icon('flag')}<span>${S.q[q.id]?.pend ? 'En falladas' : 'Marcar como fallada'}</span></button><button class="btn ghost" id="endBtn">Terminar</button></div>
+    <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button>${q.gen ? '' : `<button class="btn ghost flagbtn ${S.q[q.id]?.pend ? 'on' : ''}" id="flagBtn" title="Marcar como fallada: te la volveré a preguntar">${icon('flag')}<span>${S.q[q.id]?.pend ? 'En falladas' : 'Marcar como fallada'}</span></button>`}<button class="btn ghost" id="endBtn">Terminar</button></div>
     <div class="kbd">Teclado: 1-9 o A-D para responder · Enter para seguir</div>`);
   $$('.opt').forEach(b => b.onclick = () => answer(+b.dataset.i));
   $('#nextBtn').onclick = nextQuestion; $('#endBtn').onclick = finishQuiz;
   const pz = $('.passage'); if (pz) pz.ontoggle = () => { PASSAGE_OPEN = pz.open; };
-  $('#flagBtn').onclick = () => {
+  if ($('#flagBtn')) $('#flagBtn').onclick = () => {
     const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
     if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
     else { failNow(r, q.kind === 'psy'); r.fl = 1; if (q.kind === 'psy') toast('Marcada como fallada: vuelve dentro de 7 días'); else { if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); } }
@@ -1269,7 +1288,7 @@ function buildSim(mode, n = 50) {
   return shuffle(out);
 }
 routes['examenes'] = () => {
-  const sims = S.sims.slice().sort((a, b) => b.ts - a.ts); const st = S.settings;
+  const sims = S.sims.filter(x => !String(x.kind).startsWith('psy-')).sort((a, b) => b.ts - a.ts); const st = S.settings;
   app(`${head('Practicar', 'Exámenes y simulacros', `Formato real de la Fase I: 50 preguntas, 4 opciones, −${st.penalty} por fallo, en blanco no resta. Se aprueba con 25 puntos.`)}
   <div class="card hl"><div class="row"><div style="flex:1;min-width:220px"><h3>Simulacro nuevo</h3><div class="small muted">50 preguntas · ${st.simMinutes} min · cuestionarios + exámenes oficiales</div></div>
     <button class="btn" id="simReal">${icon('play')} Proporción real 2023-25</button><button class="btn sec" id="simW">Mis prioridades</button></div></div>
@@ -1291,11 +1310,12 @@ function startExam({ ids, label, kind, minutes, penalty, pass, back }) {
 }
 function renderExam() {
   const z = EXZ; z.cache = z.cache || {}; const q = z.cache[z.ids[z.i]] || shuffleQ(materialize(Q[z.ids[z.i]])); z.cache[q.id] = q;
+  z.tq = z.tq || {}; if (z.lastId) z.tq[z.lastId] = (z.tq[z.lastId] || 0) + (now() - z.lastT); z.lastId = q.id; z.lastT = now();
   const nAns = Object.keys(z.ans).length;
   app(`<div class="qtop"><span class="small muted" style="flex:1">${esc(z.label)} · <span class="mono">${z.i + 1}/${z.ids.length}</span></span><span class="timer" id="timer">${mmss(z.end - now())}</span></div>
   <div class="bar"><i style="width:${pct(nAns, z.ids.length)}%"></i></div>
-  <div class="card">${q.q ? `<div class="qtext">${esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="">` : ''}
-  ${q.o.map((o, i) => `<button class="opt ${z.ans[q.id] === i ? 'sel' : ''}" data-i="${i}"><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
+  <div class="card">${q.ctx ? `<details class="passage" open><summary>${icon('book')} Texto ${q.tx + 1}: ${esc(q.tt)}</summary><div class="ptext">${esc(q.ctx)}</div></details>` : ''}${q.q ? `<div class="qtext">${q.qhtml ? q.q : esc(q.q)}</div>` : ''}${q.img ? `<img class="qimg" src="${q.img}" alt="">` : ''}
+  ${q.o.map((o, i) => `<button class="opt ${z.ans[q.id] === i ? 'sel' : ''}" data-i="${i}"><span class="l">${L[i].toUpperCase()}</span><span>${o.length === 1 ? '' : esc(o)}</span></button>`).join('')}
   <div class="row" style="margin-top:6px"><button class="btn ghost sm" id="prev" ${z.i ? '' : 'disabled'}>${icon('chevL')}</button><button class="btn ghost sm" id="clr">Dejar en blanco</button><span class="spacer"></span><button class="btn ghost sm" id="nxt" ${z.i < z.ids.length - 1 ? '' : 'disabled'}>${icon('chevR')}</button></div></div>
   <div class="navgrid">${z.ids.map((id, i) => `<button class="${z.ans[id] != null ? 'ans' : ''} ${i === z.i ? 'cur' : ''}" data-g="${i}">${i + 1}</button>`).join('')}</div>
   <div class="row"><span class="small muted">${nAns}/${z.ids.length} respondidas · penalización −${z.penalty}</span><span class="spacer"></span><button class="btn danger" id="sub">Entregar</button></div>`);
@@ -1308,7 +1328,9 @@ function renderExam() {
 function submitExam() {
   const z = EXZ; if (!z || z.done) return; z.done = true; clearInterval(timerH);
   let ok = 0, ko = 0, blank = 0; const byT = {};
-  z.ids.forEach(id => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; const k = q.kind === 'eng' ? 'eng' : q.t; const t = byT[k] = byT[k] || { ok: 0, ko: 0, b: 0 };
+  if (z.lastId && z.tq) z.tq[z.lastId] = (z.tq[z.lastId] || 0) + (now() - z.lastT);
+  z.ids.forEach(id => { const q = z.cache?.[id] || Q[id]; if (q.kind === 'psy' && z.ans[id] != null) psyTime(q.c, z.tq?.[id], z.ans[id] === q.a); });
+  z.ids.forEach(id => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; const k = q.kind === 'eng' ? 'eng' : q.kind === 'psy' ? (PSYT.find(x => x.id === q.c)?.name || 'psico') : q.t; const t = byT[k] = byT[k] || { ok: 0, ko: 0, b: 0 };
     if (a == null) { blank++; t.b++; } else if (a === q.a) { ok++; t.ok++; record(id, true); } else { ko++; t.ko++; record(id, false); } });
   const net = ok - ko * z.penalty; const pass = net >= z.pass;
   S.sims.push({ id: uid(), ts: now(), kind: z.kind, label: z.label, ok, ko, blank, net, max: z.ids.length, pass, score: net / z.ids.length * 10, dur: now() - z.start, u: now() }); save();
@@ -1318,7 +1340,7 @@ function submitExam() {
     <p class="muted">✓ ${ok} · ✗ ${ko} (−${(ko * z.penalty).toFixed(2)}) · en blanco ${blank} · ${mmss(now() - z.start)}</p>
     <div class="tblwrap"><table class="tbl" style="max-width:520px;margin:0 auto"><tr><th>Tema</th><th>✓</th><th>✗</th><th>—</th></tr>${Object.entries(byT).map(([t, v]) => `<tr><td style="text-align:left">${esc(tname(t))}</td><td class="mono">${v.ok}</td><td class="mono">${v.ko}</td><td class="mono">${v.b}</td></tr>`).join('')}</table></div>
     <div class="row" style="justify-content:center;margin-top:16px"><button class="btn" id="rev">${icon('eye')} Revisar respuestas</button><a class="btn ghost" href="${z.back}">Volver</a></div></div><div id="review"></div>`);
-  $('#rev').onclick = () => { $('#review').innerHTML = z.ids.map((id, i) => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; return `<div class="card"><div class="small muted">${i + 1} · ${esc(q.src || '')}</div><div class="qtext" style="font-size:16px">${esc(q.q)}</div>${q.o.map((o, k) => `<div class="opt ${k === q.a ? 'ok' : k === a ? 'ko' : ''}" style="cursor:default"><span class="l">${L[k].toUpperCase()}</span><span>${esc(o)}</span></div>`).join('')}${a == null ? '<div class="small muted">En blanco</div>' : ''}${q.r ? `<div class="rule ${a === q.a ? '' : 'open'}"><div class="rh">${icon('book')} Regla</div><div>${esc(q.r)}</div></div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}</div>`; }).join(''); };
+  $('#rev').onclick = () => { $('#review').innerHTML = z.ids.map((id, i) => { const q = z.cache?.[id] || Q[id], a = z.ans[id]; return `<div class="card"><div class="small muted">${i + 1} · ${esc(q.src || '')}</div><div class="qtext" style="font-size:16px">${q.qhtml ? q.q : esc(q.q)}</div>${q.img ? `<img class="qimg" src="${q.img}" alt="">` : ''}${q.o.map((o, k) => `<div class="opt ${k === q.a ? 'ok' : k === a ? 'ko' : ''}" style="cursor:default"><span class="l">${L[k].toUpperCase()}</span><span>${o.length === 1 ? '' : esc(o)}</span></div>`).join('')}${a == null ? '<div class="small muted">En blanco</div>' : ''}${q.r ? `<div class="rule ${a === q.a ? '' : 'open'}"><div class="rh">${icon('book')} Regla</div><div>${esc(q.r)}</div></div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}</div>`; }).join(''); };
 }
 
 /* ---------- Psicotécnicos (ejercicios generados, infinitos) ---------- */
@@ -1396,34 +1418,53 @@ routes['psicotecnicos'] = (args) => {
   if (args[0] !== 'hoja') PSH = null;
   if (!has('psico')) return locked('psico', 'Psicotécnicos', 'Los psicotécnicos están en el plan Teoría + Inglés + Psicotécnicos: series numéricas y de letras, cálculo, atención y memoria, infinitos y cronometrados.');
   if (args[0] === 'hoja') return psySheet(args[1]);
+  if (args[0] === 'c') return psyCat(args[1]);
   if (args[0] && (PSY[args[0]] || args[0] === 'mix')) { PZ = { k: args[0], i: 0, n: args[0] === 'mix' ? 30 : 15, ok: 0, t0: now(), limit: args[0] === 'mix' ? 15 * 60 : 0 }; return psyNext(); }
   PZ = null;
-  app(`${head('Estudiar', 'Psicotécnicos', 'Tests de psicotécnicos con su solución oficial, tests completos en hoja y ejercicios generados que no se acaban. Haz unos minutos cada día: la velocidad se entrena.')}
-  <a class="card hl row" href="#/psicotecnicos/mix" style="color:inherit;gap:14px"><div class="ico" style="width:44px;height:44px;display:grid;place-items:center">${icon('clock')}</div><div style="flex:1"><b>Prueba cronometrada</b><div class="small muted">30 ejercicios variados · 15 minutos · como un examen</div></div>${icon('chevR', 'chev')}</a>
-  ${PSYB.length ? (() => { const card = ty => { const ids = psyByType(ty.id), seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length;
-      return `<div class="card flat psyb ${ty.top ? 'psytop' : ''}"><div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b>${ty.top ? ' <span class="pill amber">Cae mucho</span>' : ty.low ? ' <span class="pill">Cae poco</span>' : ''}<div class="small muted">${esc(ty.d)}</div><div class="small muted" style="margin-top:4px">${ids.length ? `${ty.id === 'texto' ? PSYX.length + ' textos · ' : ''}${ids.length} preguntas · ${seen ? `${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : 'sin empezar'}` : '<b>Aún no hay ejercicios cargados</b>'}</div></div></div>
-      ${ids.length ? `<div class="row" style="margin-top:10px"><button class="btn sm" data-pb="${ty.id}" data-m="seq">${icon('play')} ${ty.id === 'texto' ? (seen ? 'Siguiente texto' : 'Empezar') : seen && seen < ids.length ? 'Continuar' : 'Empezar'}</button><button class="btn ghost sm" data-pb="${ty.id}" data-m="rnd">${icon('shuffle')} ${ty.id === 'texto' ? 'Texto al azar' : 'Aleatorio'}</button></div>` : ''}</div>`; };
-    return `<h2>Lo que más cae</h2><p class="small muted" style="margin-top:-6px">Preguntas reales de tests con su solución oficial. En cada pregunta verás de qué test sale. Si fallas una, no vuelve hasta dentro de 7 días.</p>
-    <div class="grid g2">${PSYT.filter(t => t.top).map(card).join('')}</div>
-    <h2>Resto de tipos</h2><div class="grid g2">${PSYT.filter(t => !t.top).map(card).join('')}</div>`; })() : ''}
-  ${PSYS.length ? `<h2>Tests completos en hoja</h2><p class="small muted" style="margin-top:-6px">El test tal cual, con su hoja de respuestas y tiempo. Al terminar se corrige.</p>
-  <div class="grid g2">${PSYS.map(t => { const r = S.psy?.['sheet:' + t.id]; const n = t.pages.reduce((a, p) => a + p.qs.length, 0);
-    return `<a class="card flat" href="#/psicotecnicos/hoja/${t.id}" style="color:inherit"><div class="row"><div style="flex:1"><b>${esc(t.name)}</b>${({ ve: ' <span class="pill amber">Cae mucho · Espacial</span>', avi: ' <span class="pill amber">Cae mucho · Fatiga</span>' })[t.id] || ''}<div class="small muted">${n} preguntas · ${t.mins} min${t.key ? '' : ' · sin solución oficial'}</div></div>${icon('chevR', 'chev')}</div>${r ? `<div class="small muted" style="margin-top:8px">Último: ${r.last} · mejor: ${r.best}</div>` : ''}</a>`; }).join('')}</div>` : ''}
-  <h2>Ejercicios generados</h2>
-  <div class="grid g2" style="margin-top:14px">${Object.entries(PSY).map(([k, p]) => { const s = psyStat(k); return `<a class="card flat" href="#/psicotecnicos/${k}" style="color:inherit"><div class="row"><div style="flex:1"><b>${p.name}</b><div class="small muted">${p.d}</div></div>${icon('chevR', 'chev')}</div><div class="small muted" style="margin-top:10px">${s.n ? `${s.n} hechos · ${pct(s.ok, s.n)} % acierto` : 'Sin empezar'}</div></a>`; }).join('')}</div>`);
-  $$('[data-pb]').forEach(b => b.onclick = () => { const bk = PSYT.find(x => x.id === b.dataset.pb); let ids = psyByType(bk.id);
-    if (bk.id === 'texto') { // un texto completo, con sus preguntas en orden
-      const byT = {}; ids.forEach(id => (byT[Q[id].tx] = byT[Q[id].tx] || []).push(id));
-      const avail = Object.values(byT).map(l => l.filter(id => !psyWaiting(id))).filter(l => l.length);
-      if (!avail.length) return toast('Las preguntas que quedan las fallaste hace menos de 7 días');
-      const fresh = avail.filter(l => l.some(id => !rec(id).n));
-      const pick = b.dataset.m === 'rnd' ? avail[Math.floor(Math.random() * avail.length)] : (fresh[0] || avail[0]);
-      return startQuiz({ title: 'Texto largo · ' + Q[pick[0]].tt, list: pick, back: '#/psicotecnicos' });
-    }
-    if (b.dataset.m === 'rnd') ids = shuffle(ids); else { const k = ids.findIndex(id => !rec(id).n); if (k > 0) ids = ids.slice(k).concat(ids.slice(0, k)); }
-    const wait = ids.filter(psyWaiting).length; ids = ids.filter(id => !psyWaiting(id)); if (!ids.length) return toast('Todas las que quedan las fallaste hace menos de 7 días');
-    if (wait) toast(`${wait} falladas esperan a sus 7 días`); startQuiz({ title: bk.name, list: ids, back: '#/psicotecnicos' }); });
+  const card = ty => { const ids = psyByType(ty.id), seen = ids.filter(id => rec(id).n).length, ok = ids.filter(id => rec(id).last === 1).length, t = psyT(ty.id), gen = !!PSYGEN[ty.id];
+    const cnt = ty.id === 'texto' ? `${PSYX.length} textos · ${ids.length} preguntas` : ids.length ? `${ids.length} preguntas${gen ? ' + generadas' : ''}` : gen ? 'Ejercicios generados ilimitados' : 'Aún no hay ejercicios cargados';
+    return `<a class="card flat psyb ${ty.top ? 'psytop' : ''}" href="#/psicotecnicos/c/${ty.id}" style="color:inherit"><div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><b>${esc(ty.name)}</b>${ty.top ? ' <span class="pill amber">Cae mucho</span>' : ty.low ? ' <span class="pill">Cae poco</span>' : ''}<div class="small muted">${esc(ty.d)}</div>
+      <div class="small muted" style="margin-top:6px">${cnt}${seen ? ` · ${pct(seen, ids.length)} % hecho · ${pct(ok, seen)} % acierto` : ''}</div>
+      ${t.ok ? `<div class="psytime">${icon('clock')} <b>${secs(t.ms / t.ok)}</b> por acierto</div>` : ''}</div>${icon('chevR', 'chev')}</div></a>`; };
+  app(`${head('Estudiar', 'Psicotécnicos', 'Elige el tipo de psicotécnico que quieres practicar. Dentro podrás elegir de qué tests salen las preguntas y hacer práctica o un simulacro cronometrado.')}
+  <h2>Lo que más cae</h2><div class="grid g2">${PSYT.filter(t => t.top).map(card).join('')}</div>
+  <h2>Resto de tipos</h2><div class="grid g2">${PSYT.filter(t => !t.top).map(card).join('')}</div>`);
 };
+// Pantalla de una categoría
+function psyCat(c) {
+  const ty = PSYT.find(x => x.id === c); if (!ty) { location.hash = '#/psicotecnicos'; return; }
+  if (c === 'memoria') { location.hash = '#/psicotecnicos/mem'; return; }
+  const srcs = psySrcs(c), off = psyOff(c), pool = psyPool(c), useGen = PSYGEN[c] && !off.includes('gen');
+  const t = psyT(c), ids = psyByType(c), seen = ids.filter(id => rec(id).n).length, okN = ids.filter(id => rec(id).last === 1).length, wait = pool.filter(psyWaiting).length;
+  const isTx = c === 'texto', simN = isTx ? 18 : 20, simMin = Math.round(simN * (PSYSEC[c] || 45) / 60);
+  app(`${head('Psicotécnicos', esc(ty.name), esc(ty.d))}
+  <div class="card hl"><div class="row" style="gap:22px;flex-wrap:wrap">
+    <div><div class="v mono" style="font-size:26px;font-weight:800">${t.ok ? secs(t.ms / t.ok) : '—'}</div><div class="small muted">tiempo por acierto</div></div>
+    <div><div class="v mono" style="font-size:26px;font-weight:800">${t.ok ? secs(t.okms / t.ok) : '—'}</div><div class="small muted">media en las que aciertas</div></div>
+    <div><div class="v mono" style="font-size:26px;font-weight:800">${seen ? pct(okN, seen) + ' %' : '—'}</div><div class="small muted">acierto · ${seen}/${ids.length} hechas</div></div></div>
+    <p class="small muted" style="margin:10px 0 0">Tiempo por acierto = todo el tiempo que pasas en los ejercicios (desde que aparecen hasta que respondes) dividido entre los que aciertas. Es lo que te cuesta cada punto.</p></div>
+  <h2>¿De dónde salen las preguntas?</h2>
+  <div class="card">${srcs.length ? srcs.map(o => `<label class="srcrow"><input type="checkbox" data-src="${esc(o.id)}" ${off.includes(o.id) ? '' : 'checked'}><span>${esc(o.name)}</span><span class="spacer"></span><span class="small muted mono">${o.n ? o.n + ' preg.' : '∞'}</span></label>`).join('') : '<div class="small muted">Aún no hay ejercicios cargados de este tipo.</div>'}</div>
+  <div class="small muted" style="margin:-4px 0 10px">${pool.length}${useGen ? ' + generadas' : ''} preguntas seleccionadas${wait ? ` · ${wait} falladas esperan a sus 7 días` : ''}</div>
+  <div class="grid g2">
+    <button class="card flat psymode" id="mPrac" ${pool.length || useGen ? '' : 'disabled'}><b>${icon('play')} Práctica</b><div class="small muted">${isTx ? 'Un texto completo con sus 9 preguntas' : '20 preguntas'}, con la solución al momento. Las nuevas primero.</div></button>
+    <button class="card flat psymode" id="mSim" ${pool.length || useGen ? '' : 'disabled'}><b>${icon('clock')} Simulacro de examen</b><div class="small muted">${isTx ? '2 textos (18 preguntas)' : simN + ' preguntas'} · ${simMin} min · −1/3 por fallo · corrección al final</div></button>
+  </div>`);
+  $$('[data-src]').forEach(b => b.onchange = () => { const l = new Set(psyOff(c)); b.checked ? l.delete(b.dataset.src) : l.add(b.dataset.src); PSRC[c] = [...l]; localStorage.setItem('opo_psysrc', JSON.stringify(PSRC)); psyCat(c); });
+  const back = '#/psicotecnicos/c/' + c;
+  const fresh = l => { const avail = l.filter(id => !psyWaiting(id)); const nw = shuffle(avail.filter(id => !rec(id).n)), old = avail.filter(id => rec(id).n).sort((a, b) => (rec(a).t || 0) - (rec(b).t || 0)); return nw.concat(old); };
+  const texts = () => { const byT = {}; pool.forEach(id => (byT[Q[id].tx] = byT[Q[id].tx] || []).push(id)); return Object.values(byT).map(l => l.filter(id => !psyWaiting(id))).filter(l => l.length); };
+  const build = n => { const real = fresh(pool); let g = useGen ? (real.length ? Math.ceil(n / 5) : n) : 0; const l = real.slice(0, n - g); g = useGen ? n - l.length : 0; for (let k = 0; k < g; k++) l.push(genQ(pick(PSYGEN[c]), c)); return g ? shuffle(l) : l; };
+  $('#mPrac').onclick = () => {
+    if (isTx) { const av = texts(); if (!av.length) return toast('Las preguntas que quedan las fallaste hace menos de 7 días'); const p = av.find(l => l.some(id => !rec(id).n)) || av[0]; return startQuiz({ title: 'Texto largo · ' + Q[p[0]].tt, list: p, back }); }
+    const l = build(20); if (!l.length) return toast('Las preguntas que quedan las fallaste hace menos de 7 días'); startQuiz({ title: ty.name, list: l, back });
+  };
+  $('#mSim').onclick = () => {
+    let l; if (isTx) { const av = shuffle(texts()); l = av.slice(0, 2).flat(); } else l = shuffle(build(simN));
+    if (!l.length) return toast('No hay preguntas disponibles con estos orígenes');
+    startExam({ ids: l, label: 'Simulacro · ' + ty.name, kind: 'psy-' + c, minutes: Math.max(1, Math.round(l.length * (PSYSEC[c] || 45) / 60)), penalty: 1 / 3, pass: l.length / 2, back });
+  };
+}
 // Test completo en hoja: páginas originales + hoja de respuestas, cronómetro y corrección
 let PSH = null;
 function psySheet(id) {
@@ -1472,7 +1513,8 @@ function psyDraw() {
     ${c.o.map((o, i) => `<button class="opt ${done ? (i === c.a ? 'ok' : i === z.chosen ? 'ko' : '') : ''}" data-i="${i}" ${done ? 'disabled' : ''}><span class="l">${L[i].toUpperCase()}</span><span>${esc(o)}</span></button>`).join('')}
     ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto'} · ${esc(c.why)}</div></div>` : ''}</div>
     <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>`);
-  $$('.opt').forEach(b => b.onclick = () => { z.chosen = +b.dataset.i; const g = z.chosen === c.a; if (g) z.ok++; psyRecord(c.k, g); psyDraw(); });
+  if (!done) z.shown = now();
+  $$('.opt').forEach(b => b.onclick = () => { z.chosen = +b.dataset.i; const g = z.chosen === c.a; if (g) z.ok++; psyRecord(c.k, g); psyTime(c.k === 'mem' ? 'memoria' : ({ num: 'series', let: 'series', calc: 'calculo', aten: 'atencion' })[c.k], now() - z.shown, g); psyDraw(); });
   $('#nextBtn').onclick = psyNext; $('#endBtn').onclick = psyEnd;
   if (z.limit) z.h = setTimeout(function tick() { if (PZ !== z) return; const el = $('#psyT'); const tl = z.limit - Math.round((now() - z.t0) / 1000); if (tl <= 0) return psyEnd(); if (el) el.textContent = `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`; z.h = setTimeout(tick, 1000); }, 1000);
 }

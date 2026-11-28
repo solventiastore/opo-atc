@@ -717,3 +717,14 @@ body .prose mark.uh.c-p{background:rgba(244,114,182,.42);color:inherit}
 .passage .ptext{padding:0 16px 14px;font-size:15px;line-height:1.65;max-height:46vh;overflow:auto;text-align:justify}
 .passage summary svg{width:16px;height:16px;flex:none}
 @media(max-width:600px){.passage .ptext{max-height:38vh;font-size:14.5px;text-align:left}}
+
+.psytime{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--ink,inherit);background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:999px;padding:3px 10px}
+.psytime svg{width:14px;height:14px}
+.srcrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+.srcrow:last-child{border-bottom:0}
+.srcrow input{width:18px;height:18px;accent-color:#0ea5e9}
+.psymode{text-align:left;cursor:pointer;font:inherit;color:inherit;display:block;width:100%}
+.psymode b{display:flex;align-items:center;gap:8px;font-size:16px;margin-bottom:4px}
+.psymode b svg{width:18px;height:18px}
+.psymode:hover{border-color:rgba(14,165,233,.5)}
+.psymode[disabled]{opacity:.5;cursor:not-allowed}
