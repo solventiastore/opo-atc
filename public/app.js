@@ -47,6 +47,7 @@ const IC = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
   card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
   receipt: '<path d="M5 2h14v20l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+  flag: '<path d="M4 22V4"/><path d="M4 4h13l-2 4 2 4H4"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
@@ -597,10 +598,16 @@ function renderQuiz(anim) {
       ${done ? `<div class="fb ${ok ? 'ok' : 'ko'}">${icon(ok ? 'check' : 'x')}<div>${ok ? 'Correcto' : 'Incorrecto · la buena es la ' + L[q.a].toUpperCase() + (q.o[q.a].length === 1 ? '' : ': ' + esc(q.o[q.a]))}</div></div>${q.r ? `<div class="rule ${ok ? '' : 'open'}"><div class="rh">${icon('book')} ${ok ? 'La regla' : 'Para no volver a fallarla'}</div><div>${esc(q.r)}</div>${q.kn ? `<div class="small muted" style="margin-top:6px">Nota de la clave: ${esc(q.kn)}</div>` : ''}</div>` : ''}${q.x ? `<div class="warnbox">${icon('alert')}<div>${esc(q.x)}</div></div>` : ''}
         ${q.kind === 'cuest' ? `<div class="row small" style="margin-top:8px">${pg && pagesOf(q.t).length ? `<a href="#/resumenes/${q.t}/${pg}">${icon('book', 'chev')} Ver en el resumen (p. ${pg})</a>` : ''}${q.pg ? `<a href="#/temario/${TOP[q.t].n}/${q.pg[0]}">${icon('marker', 'chev')} Temario p. ${q.pg[0]}</a>` : ''}</div>` : ''}` : ''}
     </div>
-    <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost" id="endBtn">Terminar</button></div>
+    <div class="qactions"><button class="btn block" id="nextBtn" ${done ? '' : 'disabled'}>Siguiente ${icon('chevR')}</button><button class="btn ghost flagbtn ${S.q[q.id]?.pend ? 'on' : ''}" id="flagBtn" title="Marcar como fallada: te la volveré a preguntar">${icon('flag')}<span>${S.q[q.id]?.pend ? 'En falladas' : 'Marcar como fallada'}</span></button><button class="btn ghost" id="endBtn">Terminar</button></div>
     <div class="kbd">Teclado: 1-9 o A-D para responder · Enter para seguir</div>`);
   $$('.opt').forEach(b => b.onclick = () => answer(+b.dataset.i));
   $('#nextBtn').onclick = nextQuestion; $('#endBtn').onclick = finishQuiz;
+  $('#flagBtn').onclick = () => {
+    const r = Object.assign({ n: 0, ok: 0, ko: 0 }, S.q[q.id]);
+    if (r.pend) { r.pend = false; r.po = 0; toast('Quitada de falladas'); }
+    else { r.pend = true; r.po = 0; r.due = now() + DAY; if (!QZ.requeue.some(x => x.id === q.id)) QZ.requeue.push({ id: q.id, at: QZ.count }); toast('Marcada como fallada: te la vuelvo a preguntar'); }
+    r.u = now(); S.q[q.id] = r; save(); renderQuiz();
+  };
   if (!anim) window.scrollTo(0, 0);
   else { const f = $('.fb'); if (f && f.getBoundingClientRect().bottom > innerHeight - 140) window.scrollBy({ top: f.getBoundingClientRect().bottom - innerHeight + 160, behavior: 'smooth' }); }
 }
@@ -927,9 +934,11 @@ const Hl = {
     const key = root.dataset.hp; root.querySelectorAll('mark.uh').forEach(m => { const p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); p.normalize(); });
     Hl.live().filter(([, h]) => h.k === key).sort((x, y) => x[1].s - y[1].s).forEach(([id, h]) => Hl.wrap(root, h.s, h.e, id, h.c, h.n));
     const aside = $(`.notes[data-np="${key}"]`); if (!aside) return;
-    const notes = Hl.live().filter(([, h]) => h.k === key && h.n).sort((x, y) => x[1].s - y[1].s);
-    aside.innerHTML = notes.length ? `<div class="tiny" style="margin-bottom:8px">Tus notas</div>` + notes.map(([id, h]) => `<div class="note" data-nid="${id}"><div class="nq"><i class="dot c-${h.c}"></i>${esc(h.q.length > 70 ? h.q.slice(0, 70) + '…' : h.q)}</div><div class="nt">${esc(h.n).replace(/\n/g, '<br>')}</div></div>`).join('') : '';
-    aside.classList.toggle('empty', !notes.length);
+    const notes = Hl.live().filter(([, h]) => h.k === key && h.n);
+    const wrap = aside.parentNode; const wr = wrap.getBoundingClientRect();
+    aside.innerHTML = notes.map(([id, h]) => { const mk = root.querySelector(`mark.uh[data-h="${id}"]`); if (!mk) return ''; const top = mk.getBoundingClientRect().top - wr.top;
+      return `<button class="nicon c-${h.c}" data-nid="${id}" style="top:${Math.round(top)}px" aria-label="Ver nota">${icon('marker')}<span class="nbub"><span class="nq">${esc(h.q.length > 60 ? h.q.slice(0, 60) + '…' : h.q)}</span><span class="nt">${esc(h.n).replace(/\n/g, '<br>')}</span><span class="nh">Toca para editar</span></span></button>`; }).join('');
+    wrap.classList.toggle('has-notes', !!notes.length);
   },
   save(id, h) { S.hl[id] = Object.assign({}, S.hl[id], h, { u: now() }); save(); },
   menu: null,
@@ -937,7 +946,7 @@ const Hl = {
   open(x, y, html, bind) {
     Hl.close(); const m = document.createElement('div'); m.className = 'hlmenu'; m.innerHTML = html; document.body.appendChild(m);
     const r = m.getBoundingClientRect(); m.style.left = Math.max(8, Math.min(innerWidth - r.width - 8, x - r.width / 2)) + 'px'; m.style.top = Math.max(8, y - r.height - 10) + 'px';
-    Hl.menu = m; m.addEventListener('mousedown', e => { if (!e.target.closest('textarea')) e.preventDefault(); }); bind(m);
+    Hl.menu = m; Hl.menuY = scrollY; m.addEventListener('mousedown', e => { if (!e.target.closest('textarea')) e.preventDefault(); }); bind(m);
   },
   noteBox(id) {
     const h = S.hl[id]; const mk = $(`mark.uh[data-h="${id}"]`); if (!mk) return; const r = mk.getBoundingClientRect();
@@ -951,7 +960,7 @@ const Hl = {
   colors: (cur) => HL_COLORS.map(([c, l]) => `<button class="sw c-${c}${cur === c ? ' on' : ''}" data-c="${c}" title="${l}" aria-label="Subrayar en ${l.toLowerCase()}"></button>`).join(''),
   repaint() { $$('.hlable').forEach(Hl.paint); },
   mount() {
-    Hl.repaint();
+    Hl.repaint(); $$('.hlable img').forEach(im => { if (!im.complete) im.addEventListener('load', () => Hl.repaint(), { once: true }); });
     const onSel = () => {
       const sel = getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return;
       const rg = sel.getRangeAt(0); const root = (rg.commonAncestorContainer.nodeType === 1 ? rg.commonAncestorContainer : rg.commonAncestorContainer.parentNode).closest('.hlable'); if (!root) return;
@@ -970,9 +979,11 @@ const Hl = {
     };
     const app_ = $('#app');
     app_.onmouseup = () => setTimeout(onSel, 10);
+    app_.onmouseover = e => { const nt = e.target.closest('.nicon'); $$('mark.uh.flash2').forEach(m => m.classList.remove('flash2')); if (nt) $$(`mark.uh[data-h="${nt.dataset.nid}"]`).forEach(m => m.classList.add('flash2')); };
     app_.ontouchend = () => setTimeout(onSel, 250);
     app_.onclick = e => {
-      const nt = e.target.closest('.note'); if (nt) { const mk = $(`mark.uh[data-h="${nt.dataset.nid}"]`); if (mk) { mk.scrollIntoView({ block: 'center', behavior: 'smooth' }); mk.classList.add('flash'); setTimeout(() => mk.classList.remove('flash'), 1200); } return; }
+      const nt = e.target.closest('.nicon'); if (nt) { const id = nt.dataset.nid; if (matchMedia('(hover: none)').matches && !nt.classList.contains('open')) { $$('.nicon.open').forEach(x => x.classList.remove('open')); nt.classList.add('open'); return; } const mk = $(`mark.uh[data-h="${id}"]`); if (mk) { mk.classList.add('flash'); setTimeout(() => mk.classList.remove('flash'), 1200); } Hl.noteBox(id); return; }
+      $$('.nicon.open').forEach(x => x.classList.remove('open'));
       const mk = e.target.closest('mark.uh'); if (!mk || !getSelection().isCollapsed) return;
       const id = mk.dataset.h, h = S.hl[id]; const r = mk.getBoundingClientRect();
       Hl.open(r.left + r.width / 2, r.top, `<div class="hlbar">${Hl.colors(h.c)}<span class="sep"></span><button class="ib" data-a="note">${icon('marker')}<span>${h.n ? 'Editar nota' : 'Nota'}</span></button><button class="ib" data-a="del" title="Quitar subrayado">${icon('x')}</button></div>`, m => {
@@ -981,7 +992,7 @@ const Hl = {
         m.querySelector('[data-a="del"]').onclick = () => { Hl.save(id, { del: 1 }); Hl.close(); Hl.repaint(); };
       });
     };
-    if (!Hl._doc) { Hl._doc = true; document.addEventListener('mousedown', e => { if (Hl.menu && !Hl.menu.contains(e.target)) Hl.close(); }); window.addEventListener('hashchange', () => Hl.close()); window.addEventListener('scroll', () => { if (Hl.menu && !Hl.menu.querySelector('textarea')) Hl.close(); }, { passive: true }); }
+    if (!Hl._doc) { Hl._doc = true; let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if ($('.hlable')) Hl.repaint(); }, 150); }); document.addEventListener('mousedown', e => { if (Hl.menu && !Hl.menu.contains(e.target)) Hl.close(); }); window.addEventListener('hashchange', () => Hl.close()); window.addEventListener('scroll', () => { if (Hl.menu && !Hl.menu.querySelector('textarea') && Math.abs(scrollY - (Hl.menuY || 0)) > 120) Hl.close(); }, { passive: true }); }
   },
 };
 routes['resumenes'] = (args, q) => {
@@ -1007,10 +1018,11 @@ routes['resumenes'] = (args, q) => {
   ${pages.map(pg => `<div class="card"><div class="pagehead"><span class="pill" style="color:${x.c}">${v.bysec ? 'Sección' : 'Página'} ${pg.p}</span>${S.rd[t + ':' + pg.p]?.v ? `<span class="pill ok">${icon('check')} estudiada</span>` : ''}<span class="spacer"></span></div>
     <div class="rdwrap"><div class="prose hlable" data-hp="${t}:${pg.p}">${pg.h}</div><aside class="notes" data-np="${t}:${pg.p}"></aside></div></div>`).join('')}
   <div class="card flat row">${nq.length ? `<span class="small muted">${nq.length} preguntas del cuestionario salen de ${b !== a ? 'estas páginas' : 'esta página'}</span>` : ''}<span class="spacer"></span>
-    ${nq.length ? `<button class="btn sec sm" id="prac">${icon('play')} Practicarlas</button>` : ''}<button class="btn sm" id="markRead" ${allRead && !q.task ? 'disabled' : ''}>${icon('check')} ${allRead ? 'Estudiado' : 'Marcar como estudiado'}</button></div>
+    ${nq.length ? `<button class="btn sec sm" id="prac" title="Marca estas páginas como estudiadas y practica sus preguntas">${icon('play')} Estudiado: practicar sus preguntas</button>` : ''}<button class="btn sm" id="markRead" ${allRead && !q.task ? 'disabled' : ''}>${icon('check')} ${allRead ? 'Estudiado' : 'Marcar como estudiado'}</button></div>
   <div class="row" style="justify-content:space-between;margin-top:8px">${a > 1 ? `<a class="btn ghost" href="#/resumenes/${t}/${a - 1}">${icon('chevL')} Anterior</a>` : '<span></span>'}${b < last ? `<a class="btn ghost" href="#/resumenes/${t}/${b + 1}">Siguiente ${icon('chevR')}</a>` : ''}</div>`);
-  const pr = $('#prac'); if (pr) pr.onclick = () => startQuiz({ title: `${x.short} · págs. ${a}–${b}`, list: nq, studyTopic: t, back: location.hash });
-  $('#markRead').onclick = () => { if (READ && READ.key === t + a + '-' + b) { Pace.addRead(b - a + 1, readActive() / 60000); READ = null; } const ids = markRead(t, a, b); if (q.task) P.setDone(q.task, true); toast(ids.length ? `Hecho · ${ids.length} preguntas al repaso 1·3·7` : 'Marcado como estudiado'); if (q.task) location.hash = '#/hoy'; else render(); };
+  const studied = () => { if (READ && READ.key === t + a + '-' + b) { Pace.addRead(b - a + 1, readActive() / 60000); READ = null; } const ids = allRead ? [] : markRead(t, a, b); if (q.task) P.setDone(q.task, true); return ids; };
+  const pr = $('#prac'); if (pr) pr.onclick = () => { studied(); startQuiz({ title: `${x.short} · ${b !== a ? `págs. ${a}–${b}` : `pág. ${a}`}`, list: nq, studyTopic: t, back: q.task ? '#/hoy' : location.hash }); };
+  $('#markRead').onclick = () => { const ids = studied(); toast(ids.length ? `Hecho · ${ids.length} preguntas al repaso 1·3·7` : 'Marcado como estudiado'); if (q.task) location.hash = '#/hoy'; else render(); };
   Hl.mount();
 };
 
