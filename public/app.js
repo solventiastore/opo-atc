@@ -81,6 +81,24 @@ D.ex.forEach(x => { x.kind = 'exam'; Q[x.id] = x; });
 const PSYB = (R.psyBanks || []); const PSYS = (R.psySheets || []);
 PSYB.forEach(b => b.items.forEach(x => { Q[x.id] = { id: x.id, t: 'psico', kind: 'psy', bank: b.id, n: x.n, img: x.img, q: x.q || '', o: x.o, a: x.a, r: x.x || '', src: b.name + ' · nº ' + x.n }; }));
 (D.words || []).forEach((w, i) => { Q['en-words-' + i] = { id: 'en-words-' + i, t: 'eng', sub: 'words', kind: 'eng', word: w, src: 'Exam English · CPE Vocabulary 2' }; });
+// Opciones barajadas: cada vez que sale una pregunta, la buena cambia de letra.
+// No se barajan las preguntas cuyas opciones citan otras letras («A y B son correctas»), las de imagen ni las que explican con letras.
+// «Ninguna/Todas (de) las anteriores», «Todas son correctas»… se quedan en su sitio.
+const LETTER_REF = /(\b[a-e]\s*\)|\b[a-e]\s+y\s+[a-e]\b|\b(opci[oó]n|respuesta)(es)?\s+[a-e]\b|\blas dos (primeras|últimas)\b|\bambas\b)/i;
+const ANCHOR = /anteriores|^\s*(todas|ninguna)\b|son correctas|son incorrectas|ninguna es|todas son/i;
+let LASTA = {}; try { LASTA = JSON.parse(localStorage.getItem('opo_lasta') || '{}'); } catch (e) {}
+function shuffleQ(q) {
+  if (!q || !Array.isArray(q.o) || q.o.length < 3 || q.kind === 'psy' || q.noShuffle) return q;
+  if (q.o.some(o => LETTER_REF.test(String(o))) || /\b(la|opci[oó]n|respuesta)\s+[a-eA-E]\b/.test((q.x || '') + ' ' + (q.r || ''))) return q;
+  const free = q.o.map((o, i) => i).filter(i => !ANCHOR.test(String(q.o[i]))); if (free.length < 2) return q;
+  let perm, newA, tries = 0;
+  do {
+    const sh = shuffle(free); perm = q.o.map((o, i) => i); free.forEach((slot, k) => { perm[slot] = sh[k]; });
+    newA = perm.indexOf(q.a); tries++;
+  } while (tries < 12 && (newA === LASTA[q.id] || (tries < 6 && perm.every((v, i) => v === i))));
+  LASTA[q.id] = newA; try { localStorage.setItem('opo_lasta', JSON.stringify(LASTA)); } catch (e) {}
+  return Object.assign({}, q, { o: perm.map(i => q.o[i]), a: newA });
+}
 function materialize(q) {
   if (q.sub !== 'words' || q.o) return q;
   const same = (D.words || []).filter(w => w.p === q.word.p && w.w !== q.word.w);
@@ -531,7 +549,7 @@ function nextQuestion() {
     if (QZ.i >= QZ.list.length) { if (QZ.requeue.length) { id = QZ.requeue.shift().id; QZ.isRe = true; } else return finishQuiz(); }
     else { id = QZ.list[QZ.i++]; QZ.isRe = false; }
   } else { id = QZ.next(QZ); QZ.isRe = false; if (!id) return finishQuiz(); }
-  QZ.cur = materialize(Q[id]); QZ.chosen = null; QZ.count++; QZ.shown = now();
+  QZ.cur = shuffleQ(materialize(Q[id])); QZ.chosen = null; QZ.count++; QZ.shown = now();
   QZ.seen.push(id); if (QZ.seen.length > 40) QZ.seen.shift();
   renderQuiz();
 }
@@ -1216,7 +1234,7 @@ function startExam({ ids, label, kind, minutes, penalty, pass, back }) {
   renderExam();
 }
 function renderExam() {
-  const z = EXZ, q = materialize(Q[z.ids[z.i]]); z.cache = z.cache || {}; z.cache[q.id] = q;
+  const z = EXZ; z.cache = z.cache || {}; const q = z.cache[z.ids[z.i]] || shuffleQ(materialize(Q[z.ids[z.i]])); z.cache[q.id] = q;
   const nAns = Object.keys(z.ans).length;
   app(`<div class="qtop"><span class="small muted" style="flex:1">${esc(z.label)} · <span class="mono">${z.i + 1}/${z.ids.length}</span></span><span class="timer" id="timer">${mmss(z.end - now())}</span></div>
   <div class="bar"><i style="width:${pct(nAns, z.ids.length)}%"></i></div>
